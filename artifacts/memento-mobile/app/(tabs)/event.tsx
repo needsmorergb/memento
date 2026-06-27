@@ -79,16 +79,15 @@ export default function EventScreen() {
 
   const { data: eventData, isLoading: eventLoading } = useGetEventByToken(
     shareToken ?? "",
-    { query: { enabled: !!shareToken, refetchInterval: 15000 } }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { query: { enabled: !!shareToken, refetchInterval: 15000 } as any }
   );
 
   const { data: videoStatus } = useGetEventVideoStatusByToken(
     shareToken ?? "",
     {
-      query: {
-        enabled: !!shareToken && eventStatus === "ended",
-        refetchInterval: 20000,
-      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      query: { enabled: !!shareToken && eventStatus === "ended", refetchInterval: 20000 } as any,
     }
   );
 

@@ -138,7 +138,7 @@ export default function CameraScreen() {
     [eventId, requestUploadUrl, confirmUpload]
   );
 
-  const startTimer = (setter: (v: number) => void) => {
+  const startTimer = (setter: React.Dispatch<React.SetStateAction<number>>) => {
     setter(0);
     timerRef.current = setInterval(() => setter((v) => v + 1), 1000);
   };
@@ -253,7 +253,7 @@ export default function CameraScreen() {
         />
       )}
 
-      {needsCamPerm && mode !== "voice" && (
+      {needsCamPerm && (
         <View
           style={[
             StyleSheet.absoluteFill,
@@ -473,7 +473,7 @@ export default function CameraScreen() {
             <Text
               style={[
                 styles.voiceHint,
-                { color: mode === "voice" ? colors.mutedForeground : "rgba(255,255,255,0.7)", fontFamily: "Outfit_400Regular" },
+                { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
               ]}
             >
               {voiceRecording

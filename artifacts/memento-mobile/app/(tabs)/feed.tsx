@@ -407,11 +407,8 @@ export default function FeedScreen() {
     eventId ?? "",
     {
       request: { headers: { "X-Guest-Token": guestToken ?? "" } },
-      query: {
-        enabled: !!eventId,
-        refetchInterval: 10000,
-        refetchIntervalInBackground: false,
-      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: { enabled: !!eventId, refetchInterval: 10000, refetchIntervalInBackground: false } as any,
     }
   );
 

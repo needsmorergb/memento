@@ -107,7 +107,7 @@ export default function JoinScreen() {
           setEvent({
             eventId: res.event.id,
             shareToken,
-            guestToken: res.guest.guestToken,
+            guestToken: res.guest.guestToken ?? null,
             guestId: res.guest.id,
             guestName: res.guest.displayName,
             eventTitle: res.event.title,
