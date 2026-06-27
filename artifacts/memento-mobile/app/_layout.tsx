@@ -5,9 +5,9 @@ import {
   Outfit_700Bold,
   useFonts,
 } from "@expo-google-fonts/outfit";
-import { ClerkProvider } from "@clerk/expo";
+import { ClerkProvider, useAuth } from "@clerk/expo";
 import * as SecureStore from "expo-secure-store";
-import { setBaseUrl } from "@workspace/api-client-react";
+import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
@@ -73,6 +73,17 @@ function extractShareToken(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+function AuthTokenSync() {
+  const { getToken, isSignedIn } = useAuth();
+  useEffect(() => {
+    setAuthTokenGetter(isSignedIn ? () => getToken() : null);
+    return () => {
+      setAuthTokenGetter(null);
+    };
+  }, [isSignedIn, getToken]);
+  return null;
 }
 
 function DeepLinkHandler() {
@@ -156,6 +167,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <ClerkProvider publishableKey={CLERK_PK} tokenCache={tokenCache}>
+          <AuthTokenSync />
           <QueryClientProvider client={queryClient}>
             <EventProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
