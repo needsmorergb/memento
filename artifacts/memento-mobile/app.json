@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Memento",
+    "slug": "memento-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "memento-mobile",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#faf7f2"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.memento.app"
+    },
+    "android": {
+      "package": "com.memento.app"
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Memento needs camera access to scan QR codes and capture moments.",
+          "microphonePermission": "Memento needs microphone access to record videos.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Memento needs microphone access to record voice notes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Memento needs access to your photos to share them at your event.",
+          "cameraPermission": "Memento needs camera access to take photos and videos."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

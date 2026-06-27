@@ -1,0 +1,497 @@
+import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
+import React, { useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { useEvent } from "@/context/EventContext";
+import { useColors } from "@/hooks/useColors";
+import {
+  useEndEvent,
+  useGetEvent,
+  useGetEventVideoStatus,
+} from "@workspace/api-client-react";
+
+function InfoRow({
+  icon,
+  label,
+  value,
+  colors,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  value: string;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.infoRow}>
+      <View
+        style={[styles.infoIconWrap, { backgroundColor: colors.muted }]}
+      >
+        <Feather name={icon} size={16} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={[
+            styles.infoLabel,
+            { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+          ]}
+        >
+          {label}
+        </Text>
+        <Text
+          style={[
+            styles.infoValue,
+            { color: colors.foreground, fontFamily: "Outfit_500Medium" },
+          ]}
+        >
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+export default function EventScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { eventId, guestToken, guestName, eventTitle, eventStatus, clearEvent } =
+    useEvent();
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const botPad = Platform.OS === "web" ? 34 : insets.bottom;
+
+  const { data: eventData, isLoading: eventLoading } = useGetEvent(
+    eventId ?? "",
+    { query: { enabled: !!eventId, refetchInterval: 15000 } }
+  );
+
+  const { data: videoStatus, isLoading: videoLoading } = useGetEventVideoStatus(
+    eventId ?? "",
+    {
+      query: {
+        enabled: !!eventId && eventStatus === "ended",
+        refetchInterval: 20000,
+      },
+    }
+  );
+
+  const endEventMutation = useEndEvent();
+
+  const handleEndEvent = () => {
+    Alert.alert(
+      "End Event",
+      "This will end the event and start generating the highlight video. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "End & Generate",
+          style: "destructive",
+          onPress: () => {
+            if (!eventId) return;
+            endEventMutation.mutate(
+              { eventId },
+              {
+                onSuccess: () => {
+                  Haptics.notificationAsync(
+                    Haptics.NotificationFeedbackType.Success
+                  );
+                  Alert.alert(
+                    "Event ended",
+                    "Your highlight video is being compiled!"
+                  );
+                },
+                onError: (err) => {
+                  const msg =
+                    err instanceof Error ? err.message : "Could not end event";
+                  Alert.alert("Error", msg);
+                },
+              }
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  const handleLeave = () => {
+    Alert.alert("Leave Event", "Remove this event from your device?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Leave",
+        style: "destructive",
+        onPress: () => {
+          clearEvent();
+          router.replace("/onboarding");
+        },
+      },
+    ]);
+  };
+
+  const event = eventData;
+  const guestCount = event?.guestCount;
+  const mediaCount = event?.mediaCount;
+
+  const eventDate = event?.eventDate
+    ? new Date(event.eventDate).toLocaleDateString(undefined, {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
+
+  const isHost = false;
+
+  return (
+    <View
+      style={[
+        styles.root,
+        { backgroundColor: colors.background, paddingTop: topPad },
+      ]}
+    >
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingBottom: botPad + 100 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.headerSection}>
+          <Text
+            style={[
+              styles.eventTitle,
+              { color: colors.foreground, fontFamily: "Outfit_700Bold" },
+            ]}
+            numberOfLines={2}
+          >
+            {eventTitle ?? "My Event"}
+          </Text>
+          {eventStatus && (
+            <View
+              style={[
+                styles.statusPill,
+                {
+                  backgroundColor:
+                    eventStatus === "live"
+                      ? "#dcfce7"
+                      : eventStatus === "ended"
+                      ? colors.muted
+                      : "#fef9c3",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.pillDot,
+                  {
+                    backgroundColor:
+                      eventStatus === "live"
+                        ? "#16a34a"
+                        : eventStatus === "ended"
+                        ? colors.mutedForeground
+                        : "#ca8a04",
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.pillText,
+                  {
+                    color:
+                      eventStatus === "live"
+                        ? "#15803d"
+                        : eventStatus === "ended"
+                        ? colors.mutedForeground
+                        : "#854d0e",
+                    fontFamily: "Outfit_500Medium",
+                  },
+                ]}
+              >
+                {eventStatus === "live"
+                  ? "Live"
+                  : eventStatus === "ended"
+                  ? "Event Ended"
+                  : "Upcoming"}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {eventLoading && !event ? (
+          <ActivityIndicator
+            color={colors.primary}
+            style={{ marginVertical: 24 }}
+          />
+        ) : (
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            {eventDate && (
+              <InfoRow
+                icon="calendar"
+                label="Date"
+                value={eventDate}
+                colors={colors}
+              />
+            )}
+            {guestCount != null && (
+              <InfoRow
+                icon="users"
+                label="Guests"
+                value={`${guestCount} joined`}
+                colors={colors}
+              />
+            )}
+            {mediaCount != null && (
+              <InfoRow
+                icon="image"
+                label="Moments"
+                value={`${mediaCount} uploaded`}
+                colors={colors}
+              />
+            )}
+            <InfoRow
+              icon="user"
+              label="You"
+              value={guestName ?? "Guest"}
+              colors={colors}
+            />
+          </View>
+        )}
+
+        {videoStatus && (
+          <View
+            style={[
+              styles.videoCard,
+              {
+                backgroundColor:
+                  videoStatus.status === "completed"
+                    ? "#f0fdf4"
+                    : colors.muted,
+                borderColor:
+                  videoStatus.status === "completed" ? "#bbf7d0" : colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <View style={styles.videoCardHeader}>
+              <Feather
+                name="film"
+                size={20}
+                color={
+                  videoStatus.status === "completed"
+                    ? "#16a34a"
+                    : colors.primary
+                }
+              />
+              <Text
+                style={[
+                  styles.videoCardTitle,
+                  {
+                    color:
+                      videoStatus.status === "completed"
+                        ? "#15803d"
+                        : colors.foreground,
+                    fontFamily: "Outfit_600SemiBold",
+                  },
+                ]}
+              >
+                {videoStatus.status === "pending"
+                  ? "Video queued…"
+                  : videoStatus.status === "processing"
+                  ? "Compiling video…"
+                  : videoStatus.status === "completed"
+                  ? "Highlight video ready!"
+                  : "Video generation failed"}
+              </Text>
+              {(videoStatus.status === "pending" ||
+                videoStatus.status === "processing") && (
+                <ActivityIndicator size="small" color={colors.primary} />
+              )}
+            </View>
+            {videoStatus.status === "completed" && videoStatus.videoUrl && (
+              <Text
+                style={[
+                  styles.videoSub,
+                  { color: "#16a34a", fontFamily: "Outfit_400Regular" },
+                ]}
+              >
+                Your highlight reel is ready to watch!
+              </Text>
+            )}
+            {videoStatus.status === "failed" && videoStatus.errorMessage && (
+              <Text
+                style={[
+                  styles.videoSub,
+                  { color: colors.destructive, fontFamily: "Outfit_400Regular" },
+                ]}
+              >
+                {videoStatus.errorMessage}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {isHost && eventStatus !== "ended" && (
+          <View style={styles.hostSection}>
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
+              ]}
+            >
+              Host Controls
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.endBtn,
+                {
+                  backgroundColor: colors.destructive,
+                  borderRadius: colors.radius,
+                  opacity: endEventMutation.isPending ? 0.6 : 1,
+                },
+              ]}
+              onPress={handleEndEvent}
+              disabled={endEventMutation.isPending}
+              activeOpacity={0.8}
+            >
+              {endEventMutation.isPending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Feather name="stop-circle" size={18} color="#fff" />
+                  <Text
+                    style={[
+                      styles.endBtnText,
+                      { fontFamily: "Outfit_600SemiBold" },
+                    ]}
+                  >
+                    End Event & Generate Video
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={styles.leaveSection}>
+          <TouchableOpacity
+            style={[
+              styles.leaveBtn,
+              { borderColor: colors.border, borderRadius: colors.radius },
+            ]}
+            onPress={handleLeave}
+            activeOpacity={0.7}
+          >
+            <Feather name="log-out" size={16} color={colors.mutedForeground} />
+            <Text
+              style={[
+                styles.leaveBtnText,
+                {
+                  color: colors.mutedForeground,
+                  fontFamily: "Outfit_500Medium",
+                },
+              ]}
+            >
+              Leave Event
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  scroll: { paddingHorizontal: 20, paddingTop: 20, gap: 16 },
+
+  headerSection: { gap: 10 },
+  eventTitle: { fontSize: 26, lineHeight: 32 },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  pillDot: { width: 8, height: 8, borderRadius: 4 },
+  pillText: { fontSize: 13 },
+
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#00000010",
+  },
+  infoIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  infoLabel: { fontSize: 12 },
+  infoValue: { fontSize: 15, marginTop: 2 },
+
+  videoCard: {
+    borderWidth: 1,
+    padding: 16,
+    gap: 8,
+  },
+  videoCardHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  videoCardTitle: { fontSize: 15, flex: 1 },
+  videoSub: { fontSize: 13, lineHeight: 18, paddingLeft: 30 },
+
+  hostSection: { gap: 12 },
+  sectionLabel: { fontSize: 16 },
+  endBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    height: 54,
+    paddingHorizontal: 20,
+  },
+  endBtnText: { color: "#fff", fontSize: 16 },
+
+  leaveSection: { marginTop: 4 },
+  leaveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 50,
+    borderWidth: 1,
+    borderRadius: 12,
+  },
+  leaveBtnText: { fontSize: 15 },
+});
