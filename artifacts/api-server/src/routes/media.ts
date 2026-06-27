@@ -143,6 +143,21 @@ router.post(
         return;
       }
 
+      // Validate objectPath format — must start with /objects/ (the private bucket prefix)
+      if (!objectPath.startsWith("/objects/")) {
+        res.status(400).json({ error: "Invalid objectPath: must start with /objects/" });
+        return;
+      }
+
+      // Prevent path reuse: reject if this objectPath is already claimed
+      const existing = await db.query.mediaItemsTable.findFirst({
+        where: eq(mediaItemsTable.objectPath, objectPath),
+      });
+      if (existing) {
+        res.status(409).json({ error: "This object path has already been registered" });
+        return;
+      }
+
       const guest = req.guestRecord;
 
       const [item] = await db

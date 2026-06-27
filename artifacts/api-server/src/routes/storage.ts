@@ -147,22 +147,26 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
       where: eq(mediaItemsTable.objectPath, objectPath),
     });
 
-    if (mediaItem) {
-      const event = await db.query.eventsTable.findFirst({
-        where: eq(eventsTable.id, mediaItem.eventId),
-      });
+    if (!mediaItem) {
+      // Object not tracked in media_items — deny all access.
+      // Private objects must have an ownership record to be served.
+      res.status(403).json({ error: "Access denied to this object" });
+      return;
+    }
 
-      if (event) {
-        const isHost = dbUserId && event.hostId === dbUserId;
-        const isEventGuest = guestRecord && guestRecord.eventId === event.id;
+    const event = await db.query.eventsTable.findFirst({
+      where: eq(eventsTable.id, mediaItem.eventId),
+    });
 
-        if (!isHost && !isEventGuest) {
-          res.status(403).json({ error: "Access denied to this object" });
-          return;
-        }
-      }
-    } else if (!dbUserId) {
-      // Object not in media_items (e.g. thumbnails, covers): require Clerk auth
+    if (!event) {
+      res.status(403).json({ error: "Access denied to this object" });
+      return;
+    }
+
+    const isHost = dbUserId && event.hostId === dbUserId;
+    const isEventGuest = guestRecord && guestRecord.eventId === event.id;
+
+    if (!isHost && !isEventGuest) {
       res.status(403).json({ error: "Access denied to this object" });
       return;
     }

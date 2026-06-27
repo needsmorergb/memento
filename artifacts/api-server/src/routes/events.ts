@@ -8,7 +8,7 @@ import {
   subscriptionsTable,
 } from "@workspace/db/schema";
 import { eq, and, isNull, count, sql } from "drizzle-orm";
-import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
+import { requireAuth, optionalAuth, type AuthenticatedRequest } from "../lib/auth";
 import { getDurationCap, getQualityCap } from "../lib/tier";
 import crypto from "crypto";
 
@@ -385,35 +385,61 @@ router.get("/events/:eventId/guests", requireAuth, async (req: AuthenticatedRequ
   }
 });
 
-// Get event video status
-router.get("/events/:eventId/video-status", async (req, res) => {
-  try {
-    const job = await db.query.videoJobsTable.findFirst({
-      where: eq(videoJobsTable.eventId, String(req.params.eventId)),
-      orderBy: (t, { desc }) => [desc(t.createdAt)],
-    });
+// Get event video status (host or event-guest only)
+router.get(
+  "/events/:eventId/video-status",
+  optionalAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const event = await db.query.eventsTable.findFirst({
+        where: and(
+          eq(eventsTable.id, String(req.params.eventId)),
+          isNull(eventsTable.deletedAt),
+        ),
+      });
 
-    if (!job) {
-      res.status(404).json({ error: "No video job found for this event" });
-      return;
+      if (!event) {
+        res.status(404).json({ error: "Event not found" });
+        return;
+      }
+
+      // Access control: host or a guest of this event
+      const isHost = req.dbUser && req.dbUser.id === event.hostId;
+      const isEventGuest =
+        req.guestRecord && req.guestRecord.eventId === event.id;
+
+      if (!isHost && !isEventGuest) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+
+      const job = await db.query.videoJobsTable.findFirst({
+        where: eq(videoJobsTable.eventId, event.id),
+        orderBy: (t, { desc }) => [desc(t.createdAt)],
+      });
+
+      if (!job) {
+        res.status(404).json({ error: "No video job found for this event" });
+        return;
+      }
+
+      res.json({
+        id: job.id,
+        eventId: job.eventId,
+        status: job.status,
+        videoUrl: job.videoUrl,
+        durationCapSeconds: job.durationCapSeconds,
+        tier: job.tier,
+        errorMessage: job.errorMessage,
+        createdAt: job.createdAt,
+        completedAt: job.completedAt,
+      });
+    } catch (err) {
+      req.log.error(err, "Failed to get video status");
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    res.json({
-      id: job.id,
-      eventId: job.eventId,
-      status: job.status,
-      videoUrl: job.videoUrl,
-      durationCapSeconds: job.durationCapSeconds,
-      tier: job.tier,
-      errorMessage: job.errorMessage,
-      createdAt: job.createdAt,
-      completedAt: job.completedAt,
-    });
-  } catch (err) {
-    (req as any).log?.error(err, "Failed to get video status");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+  },
+);
 
 // Get QR payload for an event (host only)
 // Returns the join URL and share token to be encoded into a QR code
