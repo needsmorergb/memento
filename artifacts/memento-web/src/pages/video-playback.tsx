@@ -63,8 +63,8 @@ function AppDownloadBanner() {
   );
 }
 
-function UpgradeBanner({ tier }: { tier?: string | null }) {
-  if (tier && tier !== "free") return null;
+function UpgradeBanner({ visible }: { visible: boolean }) {
+  if (!visible) return null;
 
   function handleUpgrade() {
     window.location.href = "/host?upgrade=pro";
@@ -77,9 +77,9 @@ function UpgradeBanner({ tier }: { tier?: string | null }) {
           <Star className="w-5 h-5 text-amber-600" />
         </div>
         <div className="flex-1 text-center sm:text-left">
-          <p className="font-semibold text-sm text-amber-900">Your edit is capped at 60 seconds</p>
+          <p className="font-semibold text-sm text-amber-900">Download is a Pro feature</p>
           <p className="text-xs text-amber-700 mt-0.5">
-            Upgrade to Pro to get up to 5 minutes — every moment, not just the highlights.
+            Upgrade to Pro to download this video and get up to 5 minutes for your own events.
           </p>
         </div>
         <Button size="sm" className="flex-shrink-0" onClick={handleUpgrade} data-testid="link-upgrade">
@@ -230,7 +230,7 @@ export default function VideoPlayback() {
                 </Button>
               )}
             </div>
-            <UpgradeBanner tier={videoStatus.tier} />
+            <UpgradeBanner visible={!viewerCanDownload} />
             <AppDownloadBanner />
           </div>
         ) : videoStatus.status === "failed" ? (
@@ -275,7 +275,7 @@ export default function VideoPlayback() {
                 {videoStatus.tier ?? "free"} tier · up to {capLabel}
               </div>
             </div>
-            <UpgradeBanner tier={videoStatus.tier} />
+            <UpgradeBanner visible={!viewerCanDownload} />
             <AppDownloadBanner />
           </>
         )}

@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import { useAuth, useClerk, useUser } from "@clerk/expo";
 import { endEvent } from "@workspace/api-client-react";
 import * as Haptics from "expo-haptics";
+import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import React from "react";
 import {
@@ -23,6 +24,8 @@ import {
   useGetEventByToken,
   useGetEventVideoStatusByToken,
   useListEventMedia,
+  useGetMySubscription,
+  getGetMySubscriptionQueryKey,
 } from "@workspace/api-client-react";
 
 function InfoRow({
@@ -82,6 +85,20 @@ export default function EventScreen() {
   const { isSignedIn, getToken, signOut } = useAuth();
   const clerk = useClerk();
   const { user } = useUser();
+
+  const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN;
+  const { data: mySub } = useGetMySubscription({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: { queryKey: getGetMySubscriptionQueryKey(), enabled: !!isSignedIn } as any,
+  });
+  const subTier = mySub?.tier ?? "free";
+  const tierLabel =
+    subTier === "vendor" ? "Vendor" : subTier === "pro" ? "Pro" : "Free";
+
+  function handleManageSubscription() {
+    const portalUrl = `https://${DOMAIN}/host`;
+    Linking.openURL(portalUrl);
+  }
 
   const [showSignInForm, setShowSignInForm] = React.useState(false);
   const [signInEmail, setSignInEmail] = React.useState("");
@@ -766,6 +783,67 @@ export default function EventScreen() {
                   </Text>
                 </>
               )}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isSignedIn && (
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <View
+                style={[styles.infoIconWrap, { backgroundColor: colors.muted }]}
+              >
+                <Feather name="star" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.infoLabel,
+                    {
+                      color: colors.mutedForeground,
+                      fontFamily: "Outfit_400Regular",
+                    },
+                  ]}
+                >
+                  Subscription
+                </Text>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    { color: colors.foreground, fontFamily: "Outfit_500Medium" },
+                  ]}
+                >
+                  {tierLabel} Plan
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.signInBtn,
+                {
+                  backgroundColor: colors.primary,
+                  borderRadius: 0,
+                  borderBottomLeftRadius: colors.radius,
+                  borderBottomRightRadius: colors.radius,
+                },
+              ]}
+              onPress={handleManageSubscription}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[styles.signInBtnText, { fontFamily: "Outfit_600SemiBold" }]}
+              >
+                {subTier === "free" ? "Upgrade to Pro →" : "Manage Subscription →"}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
