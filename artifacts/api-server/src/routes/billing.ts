@@ -222,7 +222,10 @@ router.get("/billing/prices", async (_req, res) => {
   }
 });
 
-// Internal helper — called from webhook sync to activate a subscription
+// Internal helper — called from webhook sync to activate a subscription.
+// A PostgreSQL advisory lock (scoped to the transaction) serialises concurrent
+// invocations for the same userId so that duplicate checkout.session.completed
+// webhook deliveries cannot produce two active subscription rows.
 export async function activateSubscription(opts: {
   userId: string;
   tier: "pro" | "vendor";
@@ -232,35 +235,43 @@ export async function activateSubscription(opts: {
 }): Promise<void> {
   const { userId, tier, stripeSubscriptionId, stripeCustomerId, currentPeriodEnd } = opts;
 
-  const existing = await db.query.subscriptionsTable.findFirst({
-    where: and(
-      eq(subscriptionsTable.userId, userId),
-      isNull(subscriptionsTable.deletedAt),
-    ),
-  });
+  await db.transaction(async (tx) => {
+    // Acquire a transaction-scoped advisory lock keyed on a hash of the userId.
+    // pg_advisory_xact_lock blocks until it can acquire the lock, so a second
+    // concurrent call for the same user will wait until this transaction commits
+    // and then see the already-inserted/updated row.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
 
-  if (existing) {
-    await db
-      .update(subscriptionsTable)
-      .set({
+    const existing = await tx.query.subscriptionsTable.findFirst({
+      where: and(
+        eq(subscriptionsTable.userId, userId),
+        isNull(subscriptionsTable.deletedAt),
+      ),
+    });
+
+    if (existing) {
+      await tx
+        .update(subscriptionsTable)
+        .set({
+          tier,
+          status: "active",
+          stripeSubscriptionId,
+          stripeCustomerId,
+          currentPeriodEnd: currentPeriodEnd ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptionsTable.id, existing.id));
+    } else {
+      await tx.insert(subscriptionsTable).values({
+        userId,
         tier,
         status: "active",
         stripeSubscriptionId,
         stripeCustomerId,
         currentPeriodEnd: currentPeriodEnd ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(subscriptionsTable.id, existing.id));
-  } else {
-    await db.insert(subscriptionsTable).values({
-      userId,
-      tier,
-      status: "active",
-      stripeSubscriptionId,
-      stripeCustomerId,
-      currentPeriodEnd: currentPeriodEnd ?? null,
-    });
-  }
+      });
+    }
+  });
 
   if (tier === "vendor") {
     const user = await db.query.usersTable.findFirst({
