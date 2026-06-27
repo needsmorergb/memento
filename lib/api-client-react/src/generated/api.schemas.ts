@@ -265,10 +265,24 @@ export interface UploadUrlResponse {
   metadata?: UploadUrlRequest;
 }
 
+export interface EventQrPayload {
+  shareToken: string;
+  shareUrl: string;
+  /** The string to encode into the QR code (same as shareUrl) */
+  qrData: string;
+  eventId: string;
+  eventTitle: string;
+}
+
 /**
  * Unauthorized
  */
 export type UnauthorizedResponse = ErrorEnvelope;
+
+/**
+ * Forbidden
+ */
+export type ForbiddenResponse = ErrorEnvelope;
 
 /**
  * Not found

@@ -248,6 +248,30 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /events/{eventId}/qr-payload:
+    get:
+      operationId: getEventQrPayload
+      tags: [events]
+      summary: Get QR code payload for an event (host only)
+      description: Returns the join URL and QR data string to render as a QR code. Only the event host can access this.
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: QR payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventQrPayload"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ── Public Event (by token) ─────────────────────────────────────────────────
 
   /events/token/{shareToken}:
@@ -529,6 +553,12 @@ components:
   responses:
     Unauthorized:
       description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: Forbidden
       content:
         application/json:
           schema:
@@ -941,3 +971,21 @@ components:
           type: string
         metadata:
           $ref: "#/components/schemas/UploadUrlRequest"
+
+    EventQrPayload:
+      type: object
+      required: [shareToken, shareUrl, qrData, eventId, eventTitle]
+      properties:
+        shareToken:
+          type: string
+        shareUrl:
+          type: string
+          format: uri
+        qrData:
+          type: string
+          description: The string to encode into the QR code (same as shareUrl)
+        eventId:
+          type: string
+          format: uuid
+        eventTitle:
+          type: string

@@ -7,8 +7,8 @@ import {
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { getAuth } from "@clerk/express";
 import { db } from "@workspace/db";
-import { eventGuestsTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eventGuestsTable, mediaItemsTable, eventsTable } from "@workspace/db/schema";
+import { eq, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -17,10 +17,33 @@ const objectStorageService = new ObjectStorageService();
  * POST /storage/uploads/request-url
  *
  * Request a presigned URL for file upload.
- * The client sends JSON metadata (name, size, contentType) — NOT the file.
- * Then uploads the file directly to the returned presigned URL.
+ * Requires Clerk auth or a valid guest token — prevents unauthorized upload cost abuse.
  */
 router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
+  // Auth check: Clerk session OR valid guest token
+  const { userId } = getAuth(req);
+  let isAuthenticated = Boolean(userId);
+
+  let guestEventId: string | undefined;
+
+  if (!isAuthenticated) {
+    const guestToken = req.headers["x-guest-token"] as string | undefined;
+    if (guestToken) {
+      const guest = await db.query.eventGuestsTable.findFirst({
+        where: eq(eventGuestsTable.guestToken, guestToken),
+      });
+      if (guest) {
+        isAuthenticated = true;
+        guestEventId = guest.eventId;
+      }
+    }
+  }
+
+  if (!isAuthenticated) {
+    res.status(401).json({ error: "Authentication required to upload files" });
+    return;
+  }
+
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });
@@ -82,35 +105,69 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
 /**
  * GET /storage/objects/*
  *
- * Serve private object entities from PRIVATE_OBJECT_DIR.
- * Requires either a valid Clerk session or a valid guest token.
+ * Serve private object entities.
+ * Access control: caller must be authenticated AND be the event host or a guest of
+ * the event that the object belongs to.
  */
 router.get("/storage/objects/*path", async (req: Request, res: Response) => {
   try {
-    // Auth check: Clerk session OR valid guest token
-    const { userId } = getAuth(req);
-    let isAuthenticated = Boolean(userId);
+    // Resolve caller identity
+    const { userId: clerkUserId } = getAuth(req);
+    let dbUserId: string | undefined;
+    let guestRecord: typeof eventGuestsTable.$inferSelect | undefined;
 
-    if (!isAuthenticated) {
-      const guestToken = req.headers["x-guest-token"] as string | undefined;
-      if (guestToken) {
-        const guest = await db.query.eventGuestsTable.findFirst({
-          where: eq(eventGuestsTable.guestToken, guestToken),
-        });
-        if (guest) isAuthenticated = true;
-      }
+    if (clerkUserId) {
+      const { usersTable } = await import("@workspace/db/schema");
+      const user = await db.query.usersTable.findFirst({
+        where: eq(usersTable.clerkId, clerkUserId),
+      });
+      if (user) dbUserId = user.id;
     }
 
-    if (!isAuthenticated) {
+    const guestToken = req.headers["x-guest-token"] as string | undefined;
+    if (guestToken) {
+      const guest = await db.query.eventGuestsTable.findFirst({
+        where: eq(eventGuestsTable.guestToken, guestToken),
+      });
+      if (guest) guestRecord = guest;
+    }
+
+    if (!dbUserId && !guestRecord) {
       res.status(401).json({ error: "Authentication required to access private objects" });
       return;
     }
 
+    // Resolve the object path
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
     const objectPath = `/objects/${wildcardPath}`;
-    const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
 
+    // Event-level ownership check: find which event owns this object
+    const mediaItem = await db.query.mediaItemsTable.findFirst({
+      where: eq(mediaItemsTable.objectPath, objectPath),
+    });
+
+    if (mediaItem) {
+      const event = await db.query.eventsTable.findFirst({
+        where: eq(eventsTable.id, mediaItem.eventId),
+      });
+
+      if (event) {
+        const isHost = dbUserId && event.hostId === dbUserId;
+        const isEventGuest = guestRecord && guestRecord.eventId === event.id;
+
+        if (!isHost && !isEventGuest) {
+          res.status(403).json({ error: "Access denied to this object" });
+          return;
+        }
+      }
+    } else if (!dbUserId) {
+      // Object not in media_items (e.g. thumbnails, covers): require Clerk auth
+      res.status(403).json({ error: "Access denied to this object" });
+      return;
+    }
+
+    const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
     const response = await objectStorageService.downloadObject(objectFile);
 
     res.status(response.status);

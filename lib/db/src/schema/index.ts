@@ -85,9 +85,11 @@ export const insertSubscriptionSchema = createInsertSchema(
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 export type Subscription = typeof subscriptionsTable.$inferSelect;
 
-// ─── Vendor Codes ─────────────────────────────────────────────────────────────
+// ─── Referral Codes ───────────────────────────────────────────────────────────
+// Vendor-owned referral codes that guests use when joining an event.
+// Grants vendor_benefit=true on the event_guest record and a 180s video cap.
 
-export const vendorCodesTable = pgTable("vendor_codes", {
+export const referralCodesTable = pgTable("referral_codes", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .notNull()
@@ -101,11 +103,11 @@ export const vendorCodesTable = pgTable("vendor_codes", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const insertVendorCodeSchema = createInsertSchema(
-  vendorCodesTable,
+export const insertReferralCodeSchema = createInsertSchema(
+  referralCodesTable,
 ).omit({ id: true, createdAt: true });
-export type InsertVendorCode = z.infer<typeof insertVendorCodeSchema>;
-export type VendorCode = typeof vendorCodesTable.$inferSelect;
+export type InsertReferralCode = z.infer<typeof insertReferralCodeSchema>;
+export type ReferralCode = typeof referralCodesTable.$inferSelect;
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
@@ -151,7 +153,7 @@ export const eventGuestsTable = pgTable("event_guests", {
   phone: varchar("phone", { length: 50 }),
   guestToken: varchar("guest_token", { length: 128 }).unique().notNull(),
   pushToken: text("push_token"),
-  vendorCodeId: uuid("vendor_code_id").references(() => vendorCodesTable.id),
+  referralCodeId: uuid("referral_code_id").references(() => referralCodesTable.id),
   vendorBenefit: boolean("vendor_benefit").default(false).notNull(),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
@@ -199,6 +201,8 @@ export const videoJobsTable = pgTable("video_jobs", {
     .references(() => eventsTable.id),
   tier: subscriptionTierEnum("tier").default("free").notNull(),
   durationCapSeconds: integer("duration_cap_seconds").default(60).notNull(),
+  qualityCap: varchar("quality_cap", { length: 10 }).default("720p").notNull(),
+  maxResolutionPx: integer("max_resolution_px").default(1280).notNull(),
   status: videoJobStatusEnum("status").default("pending").notNull(),
   videoObjectPath: text("video_object_path"),
   videoUrl: text("video_url"),

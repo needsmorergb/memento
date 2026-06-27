@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable, vendorCodesTable } from "@workspace/db/schema";
+import { usersTable, referralCodesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
 import crypto from "crypto";
@@ -47,14 +47,14 @@ router.post(
         .where(eq(usersTable.id, user.id));
 
       // Create referral code if one doesn't exist
-      let vendorCode = await db.query.vendorCodesTable.findFirst({
-        where: eq(vendorCodesTable.userId, user.id),
+      let referralCode = await db.query.referralCodesTable.findFirst({
+        where: eq(referralCodesTable.userId, user.id),
       });
 
-      if (!vendorCode) {
+      if (!referralCode) {
         const code = generateReferralCode(businessName);
-        [vendorCode] = await db
-          .insert(vendorCodesTable)
+        [referralCode] = await db
+          .insert(referralCodesTable)
           .values({
             userId: user.id,
             code,
@@ -67,7 +67,7 @@ router.post(
       res.json({
         isVendor: true,
         businessName,
-        referralCode: vendorCode.code,
+        referralCode: referralCode.code,
       });
     } catch (err) {
       req.log.error(err, "Failed to register vendor");
@@ -83,20 +83,20 @@ router.get(
   async (req: AuthenticatedRequest, res) => {
     try {
       const user = req.dbUser!;
-      const vendorCode = await db.query.vendorCodesTable.findFirst({
-        where: eq(vendorCodesTable.userId, user.id),
+      const referralCode = await db.query.referralCodesTable.findFirst({
+        where: eq(referralCodesTable.userId, user.id),
       });
 
-      if (!vendorCode) {
+      if (!referralCode) {
         res.status(404).json({ error: "No referral code found — register as a vendor first" });
         return;
       }
 
       res.json({
-        code: vendorCode.code,
-        joinUrl: buildJoinUrl(vendorCode.code),
-        benefitDescription: vendorCode.benefitDescription,
-        videoDurationCapSeconds: vendorCode.videoDurationCapSeconds,
+        code: referralCode.code,
+        joinUrl: buildJoinUrl(referralCode.code),
+        benefitDescription: referralCode.benefitDescription,
+        videoDurationCapSeconds: referralCode.videoDurationCapSeconds,
       });
     } catch (err) {
       req.log.error(err, "Failed to get referral code");

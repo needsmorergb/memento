@@ -268,6 +268,23 @@ export const GetEventVideoStatusResponse = zod.object({
 
 
 /**
+ * Returns the join URL and QR data string to render as a QR code. Only the event host can access this.
+ * @summary Get QR code payload for an event (host only)
+ */
+export const GetEventQrPayloadParams = zod.object({
+  "eventId": zod.coerce.string().uuid()
+})
+
+export const GetEventQrPayloadResponse = zod.object({
+  "shareToken": zod.string(),
+  "shareUrl": zod.string().url(),
+  "qrData": zod.string().describe('The string to encode into the QR code (same as shareUrl)'),
+  "eventId": zod.string().uuid(),
+  "eventTitle": zod.string()
+})
+
+
+/**
  * @summary Get public event info by share token
  */
 export const GetEventByTokenParams = zod.object({

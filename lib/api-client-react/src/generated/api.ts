@@ -24,6 +24,8 @@ import type {
   ConfirmMediaUploadRequest,
   CreateEventRequest,
   EventDetail,
+  EventQrPayload,
+  ForbiddenResponse,
   GuestSummary,
   HealthStatus,
   InternalErrorResponse,
@@ -877,6 +879,84 @@ export function useGetEventVideoStatus<TData = Awaited<ReturnType<typeof getEven
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetEventVideoStatusQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetEventQrPayloadUrl = (eventId: string,) => {
+
+
+
+
+  return `/api/events/${eventId}/qr-payload`
+}
+
+/**
+ * Returns the join URL and QR data string to render as a QR code. Only the event host can access this.
+ * @summary Get QR code payload for an event (host only)
+ */
+export const getEventQrPayload = async (eventId: string, options?: RequestInit): Promise<EventQrPayload> => {
+
+  return customFetch<EventQrPayload>(getGetEventQrPayloadUrl(eventId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEventQrPayloadQueryKey = (eventId: string,) => {
+    return [
+    `/api/events/${eventId}/qr-payload`
+    ] as const;
+    }
+
+
+export const getGetEventQrPayloadQueryOptions = <TData = Awaited<ReturnType<typeof getEventQrPayload>>, TError = ErrorType<UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>>(eventId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEventQrPayload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEventQrPayloadQueryKey(eventId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEventQrPayload>>> = ({ signal }) => getEventQrPayload(eventId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEventQrPayload>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEventQrPayloadQueryResult = NonNullable<Awaited<ReturnType<typeof getEventQrPayload>>>
+export type GetEventQrPayloadQueryError = ErrorType<UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>
+
+
+/**
+ * @summary Get QR code payload for an event (host only)
+ */
+
+export function useGetEventQrPayload<TData = Awaited<ReturnType<typeof getEventQrPayload>>, TError = ErrorType<UnauthorizedResponse | ForbiddenResponse | NotFoundResponse>>(
+ eventId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEventQrPayload>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEventQrPayloadQueryOptions(eventId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

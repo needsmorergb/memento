@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 import {
   eventsTable,
   eventGuestsTable,
-  vendorCodesTable,
+  referralCodesTable,
   usersTable,
 } from "@workspace/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
@@ -60,18 +60,18 @@ router.post("/guests/join", async (req, res) => {
       }
     }
 
-    let vendorCodeId: string | undefined;
+    let referralCodeId: string | undefined;
     let vendorBenefit = false;
 
     if (referralCode) {
-      const vendorCode = await db.query.vendorCodesTable.findFirst({
+      const code = await db.query.referralCodesTable.findFirst({
         where: and(
-          eq(vendorCodesTable.code, referralCode),
-          eq(vendorCodesTable.isActive, true),
+          eq(referralCodesTable.code, referralCode),
+          eq(referralCodesTable.isActive, true),
         ),
       });
-      if (vendorCode) {
-        vendorCodeId = vendorCode.id;
+      if (code) {
+        referralCodeId = code.id;
         vendorBenefit = true;
       }
     }
@@ -86,7 +86,7 @@ router.post("/guests/join", async (req, res) => {
         email,
         phone,
         guestToken,
-        vendorCodeId,
+        referralCodeId,
         vendorBenefit,
       })
       .returning();
