@@ -1,0 +1,223 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import {
+  useGetVendorReferralCode,
+  useRegisterVendor,
+  useGetMe,
+  getGetVendorReferralCodeQueryKey,
+  getGetMeQueryKey,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Copy, Share2, CheckCircle, Store } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+
+export default function VendorPage() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: me, isLoading: meLoading } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
+  const { data: codeInfo, isLoading: codeLoading } = useGetVendorReferralCode({
+    query: {
+      enabled: !!me?.isVendor,
+      queryKey: getGetVendorReferralCodeQueryKey(),
+    },
+  });
+
+  const registerVendor = useRegisterVendor();
+  const [businessName, setBusinessName] = useState("");
+
+  function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    if (!businessName) return;
+    registerVendor.mutate(
+      { data: { businessName } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetVendorReferralCodeQueryKey() });
+          toast({ title: "Vendor account created" });
+        },
+        onError: () => toast({ title: "Registration failed", variant: "destructive" }),
+      }
+    );
+  }
+
+  function copyCode() {
+    if (!codeInfo?.code) return;
+    navigator.clipboard.writeText(codeInfo.code).then(() => {
+      toast({ title: "Code copied" });
+    });
+  }
+
+  const isLoading = meLoading;
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="max-w-3xl mx-auto px-6 h-16 flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => setLocation("/host")} data-testid="button-back">
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <h1 className="font-serif text-lg font-bold">Vendor portal</h1>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-6 py-10">
+        {isLoading ? (
+          <div className="space-y-6">
+            <Skeleton className="h-48 rounded-2xl" />
+            <Skeleton className="h-32 rounded-2xl" />
+          </div>
+        ) : !me?.isVendor ? (
+          /* Registration form */
+          <div>
+            <div className="text-center mb-10">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5">
+                <Store className="w-7 h-7 text-primary" />
+              </div>
+              <h2 className="font-serif text-3xl font-bold mb-3">Become a vendor</h2>
+              <p className="text-muted-foreground max-w-md mx-auto">
+                As a photographer, wedding planner, or event vendor, get your own referral code to give clients extended video edits.
+              </p>
+            </div>
+
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle className="font-serif text-lg">Vendor benefits</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-3">
+                  {[
+                    "Your own referral code to distribute to clients",
+                    "Clients using your code get 3-minute video edits (instead of 60s)",
+                    "Vendor dashboard to track code usage",
+                    "Priority video processing",
+                  ].map((benefit) => (
+                    <li key={benefit} className="flex items-start gap-2.5 text-sm">
+                      <CheckCircle className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                      {benefit}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="font-serif text-lg">Register your business</CardTitle>
+                <CardDescription>Enter your business name to get your referral code</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleRegister} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="businessName">Business name</Label>
+                    <Input
+                      id="businessName"
+                      placeholder="Jane Smith Photography"
+                      value={businessName}
+                      onChange={(e) => setBusinessName(e.target.value)}
+                      required
+                      data-testid="input-business-name"
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={registerVendor.isPending} data-testid="button-register-vendor">
+                    {registerVendor.isPending ? "Registering..." : "Register as vendor"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        ) : (
+          /* Vendor dashboard */
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Store className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="font-serif text-2xl font-bold">{me.vendorBusinessName ?? "Your Business"}</h2>
+                <Badge variant="outline" className="text-xs mt-0.5" data-testid="badge-vendor">Vendor account</Badge>
+              </div>
+            </div>
+
+            {codeLoading ? (
+              <Skeleton className="h-40 rounded-2xl" />
+            ) : codeInfo ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="font-serif text-lg">Your referral code</CardTitle>
+                  <CardDescription>
+                    Share this code with clients. When they use it to join an event, they get extended video edits.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="flex items-center gap-3" data-testid="card-referral-code">
+                    <div className="flex-1 bg-muted rounded-xl px-5 py-4 text-center">
+                      <span className="text-3xl font-bold font-mono tracking-widest text-primary" data-testid="text-referral-code">
+                        {codeInfo.code}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Button variant="outline" size="icon" onClick={copyCode} data-testid="button-copy-code">
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 pt-2">
+                    <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
+                      <div className="text-2xl font-bold text-primary mb-1" data-testid="text-video-cap">
+                        {Math.floor(codeInfo.videoDurationCapSeconds / 60)}:{String(codeInfo.videoDurationCapSeconds % 60).padStart(2, "0")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Video cap for clients</div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
+                      <div className="text-2xl font-bold mb-1" data-testid="text-code-status">
+                        Active
+                      </div>
+                      <div className="text-xs text-muted-foreground">Code status</div>
+                    </div>
+                  </div>
+
+                  {codeInfo.benefitDescription && (
+                    <p className="text-sm text-muted-foreground border-t border-border pt-4">
+                      {codeInfo.benefitDescription}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="text-center py-10 text-muted-foreground">
+                  <Share2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p>Your referral code is being generated</p>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="font-serif text-lg">How to use your code</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ol className="space-y-3 text-sm text-muted-foreground list-decimal list-inside">
+                  <li>Share your code <strong className="text-foreground">{codeInfo?.code ?? "..."}</strong> with your client</li>
+                  <li>When they join the event, they enter your code in the join form</li>
+                  <li>Their same-day edit video will be up to {codeInfo ? `${Math.floor(codeInfo.videoDurationCapSeconds / 60)} minutes` : "3 minutes"} long</li>
+                </ol>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}

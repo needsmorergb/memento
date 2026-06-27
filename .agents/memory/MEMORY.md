@@ -1,0 +1,2 @@
+- [Memento project overview](memento-overview.md) — stack, schema facts, and API client patterns to avoid re-learning
+- [Schema field names](memento-schema-fields.md) — common field name gotchas between DB/API schemas and frontend

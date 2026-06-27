@@ -14,6 +14,12 @@ import crypto from "crypto";
 
 const router = Router();
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(v: string): boolean {
+  return UUID_RE.test(v);
+}
+
 function generateShareToken(): string {
   return crypto.randomBytes(16).toString("hex");
 }
