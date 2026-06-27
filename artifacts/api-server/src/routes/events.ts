@@ -9,7 +9,7 @@ import {
 } from "@workspace/db/schema";
 import { eq, and, isNull, count, sql } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
-import { getDurationCap } from "../lib/tier";
+import { getDurationCap, getQualityCap } from "../lib/tier";
 import crypto from "crypto";
 
 const router = Router();
@@ -315,6 +315,7 @@ router.post("/events/:eventId/end", requireAuth, async (req: AuthenticatedReques
     });
     const tier = subscription?.tier ?? "free";
     const durationCap = getDurationCap(tier);
+    const { quality, maxResolutionPx } = getQualityCap(tier);
 
     const [job] = await db
       .insert(videoJobsTable)
@@ -322,6 +323,8 @@ router.post("/events/:eventId/end", requireAuth, async (req: AuthenticatedReques
         eventId: event.id,
         tier,
         durationCapSeconds: durationCap,
+        qualityCap: quality,
+        maxResolutionPx,
       })
       .returning();
 

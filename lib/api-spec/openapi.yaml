@@ -473,6 +473,10 @@ paths:
       tags: [storage]
       operationId: requestUploadUrl
       summary: Request a presigned URL for file upload
+      description: Requires Clerk auth (for hosts) or a guest token (for event guests). Prevents unauthorized upload cost abuse.
+      security:
+        - clerkAuth: []
+        - guestToken: []
       requestBody:
         required: true
         content:
@@ -488,6 +492,8 @@ paths:
                 $ref: "#/components/schemas/UploadUrlResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -540,6 +546,11 @@ components:
     clerkAuth:
       type: http
       scheme: bearer
+    guestToken:
+      type: apiKey
+      in: header
+      name: X-Guest-Token
+      description: Guest token issued at event join (for unauthenticated guests)
 
   parameters:
     eventId:

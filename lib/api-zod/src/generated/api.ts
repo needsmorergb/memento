@@ -461,6 +461,7 @@ export const GetVendorReferralCodeResponse = zod.object({
 
 
 /**
+ * Requires Clerk auth (for hosts) or a guest token (for event guests). Prevents unauthorized upload cost abuse.
  * @summary Request a presigned URL for file upload
  */
 

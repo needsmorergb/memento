@@ -1567,6 +1567,7 @@ export const getRequestUploadUrlUrl = () => {
 }
 
 /**
+ * Requires Clerk auth (for hosts) or a guest token (for event guests). Prevents unauthorized upload cost abuse.
  * @summary Request a presigned URL for file upload
  */
 export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: RequestInit): Promise<UploadUrlResponse> => {
@@ -1583,7 +1584,7 @@ export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, optio
 
 
 
-export const getRequestUploadUrlMutationOptions = <TError = ErrorType<BadRequestResponse | InternalErrorResponse>,
+export const getRequestUploadUrlMutationOptions = <TError = ErrorType<BadRequestResponse | UnauthorizedResponse | InternalErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext> => {
 
@@ -1612,12 +1613,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestUploadUrl>>>
     export type RequestUploadUrlMutationBody = BodyType<UploadUrlRequest>
-    export type RequestUploadUrlMutationError = ErrorType<BadRequestResponse | InternalErrorResponse>
+    export type RequestUploadUrlMutationError = ErrorType<BadRequestResponse | UnauthorizedResponse | InternalErrorResponse>
 
     /**
  * @summary Request a presigned URL for file upload
  */
-export const useRequestUploadUrl = <TError = ErrorType<BadRequestResponse | InternalErrorResponse>,
+export const useRequestUploadUrl = <TError = ErrorType<BadRequestResponse | UnauthorizedResponse | InternalErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof requestUploadUrl>>,

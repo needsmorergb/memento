@@ -77,19 +77,22 @@ export const subscriptionsTable = pgTable("subscriptions", {
   currentPeriodEnd: timestamp("current_period_end"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const insertSubscriptionSchema = createInsertSchema(
   subscriptionsTable,
-).omit({ id: true, createdAt: true, updatedAt: true });
+).omit({ id: true, createdAt: true, updatedAt: true, deletedAt: true });
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 export type Subscription = typeof subscriptionsTable.$inferSelect;
 
-// ─── Referral Codes ───────────────────────────────────────────────────────────
-// Vendor-owned referral codes that guests use when joining an event.
-// Grants vendor_benefit=true on the event_guest record and a 180s video cap.
+// ─── Vendor Codes (Referral Codes) ────────────────────────────────────────────
+// Vendor-owned referral codes that guests present when joining an event.
+// Granting vendor_benefit=true on the event_guest record and a 180s video cap.
+// This table fulfills both the "vendor_codes" and "referral_codes" requirements
+// in a single entity — each vendor owns one or more codes they distribute.
 
-export const referralCodesTable = pgTable("referral_codes", {
+export const vendorCodesTable = pgTable("vendor_codes", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .notNull()
@@ -101,13 +104,18 @@ export const referralCodesTable = pgTable("referral_codes", {
     .notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
 });
 
-export const insertReferralCodeSchema = createInsertSchema(
-  referralCodesTable,
-).omit({ id: true, createdAt: true });
-export type InsertReferralCode = z.infer<typeof insertReferralCodeSchema>;
-export type ReferralCode = typeof referralCodesTable.$inferSelect;
+/** Alias — same table, surfaced as "referral codes" in guest-facing contexts */
+export const referralCodesTable = vendorCodesTable;
+
+export const insertVendorCodeSchema = createInsertSchema(
+  vendorCodesTable,
+).omit({ id: true, createdAt: true, updatedAt: true, deletedAt: true });
+export type InsertVendorCode = z.infer<typeof insertVendorCodeSchema>;
+export type VendorCode = typeof vendorCodesTable.$inferSelect;
 
 // ─── Events ───────────────────────────────────────────────────────────────────
 
@@ -153,7 +161,7 @@ export const eventGuestsTable = pgTable("event_guests", {
   phone: varchar("phone", { length: 50 }),
   guestToken: varchar("guest_token", { length: 128 }).unique().notNull(),
   pushToken: text("push_token"),
-  referralCodeId: uuid("referral_code_id").references(() => referralCodesTable.id),
+  vendorCodeId: uuid("vendor_code_id").references(() => vendorCodesTable.id),
   vendorBenefit: boolean("vendor_benefit").default(false).notNull(),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
@@ -181,12 +189,14 @@ export const mediaItemsTable = pgTable("media_items", {
   durationSeconds: integer("duration_seconds"),
   thumbnailPath: text("thumbnail_path"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
 });
 
 export const insertMediaItemSchema = createInsertSchema(mediaItemsTable).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   deletedAt: true,
 });
 export type InsertMediaItem = z.infer<typeof insertMediaItemSchema>;
@@ -211,6 +221,7 @@ export const videoJobsTable = pgTable("video_jobs", {
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const insertVideoJobSchema = createInsertSchema(videoJobsTable).omit({
@@ -223,6 +234,7 @@ export const insertVideoJobSchema = createInsertSchema(videoJobsTable).omit({
   completedAt: true,
   createdAt: true,
   updatedAt: true,
+  deletedAt: true,
 });
 export type InsertVideoJob = z.infer<typeof insertVideoJobSchema>;
 export type VideoJob = typeof videoJobsTable.$inferSelect;
