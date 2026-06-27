@@ -5,7 +5,10 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { ObjectPermission } from "../lib/objectAcl";
+import { getAuth } from "@clerk/express";
+import { db } from "@workspace/db";
+import { eventGuestsTable } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -48,7 +51,6 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
  *
  * Serve public assets from PUBLIC_OBJECT_SEARCH_PATHS.
  * These are unconditionally public — no authentication or ACL checks.
- * IMPORTANT: Always provide this endpoint when object storage is set up.
  */
 router.get("/storage/public-objects/*filePath", async (req: Request, res: Response) => {
   try {
@@ -80,31 +82,34 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
 /**
  * GET /storage/objects/*
  *
- * Serve object entities from PRIVATE_OBJECT_DIR.
- * These are served from a separate path from /public-objects and can optionally
- * be protected with authentication or ACL checks based on the use case.
+ * Serve private object entities from PRIVATE_OBJECT_DIR.
+ * Requires either a valid Clerk session or a valid guest token.
  */
 router.get("/storage/objects/*path", async (req: Request, res: Response) => {
   try {
+    // Auth check: Clerk session OR valid guest token
+    const { userId } = getAuth(req);
+    let isAuthenticated = Boolean(userId);
+
+    if (!isAuthenticated) {
+      const guestToken = req.headers["x-guest-token"] as string | undefined;
+      if (guestToken) {
+        const guest = await db.query.eventGuestsTable.findFirst({
+          where: eq(eventGuestsTable.guestToken, guestToken),
+        });
+        if (guest) isAuthenticated = true;
+      }
+    }
+
+    if (!isAuthenticated) {
+      res.status(401).json({ error: "Authentication required to access private objects" });
+      return;
+    }
+
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
     const objectPath = `/objects/${wildcardPath}`;
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
-
-    // --- Protected route example (uncomment when using replit-auth) ---
-    // if (!req.isAuthenticated()) {
-    //   res.status(401).json({ error: "Unauthorized" });
-    //   return;
-    // }
-    // const canAccess = await objectStorageService.canAccessObjectEntity({
-    //   userId: req.user.id,
-    //   objectFile,
-    //   requestedPermission: ObjectPermission.READ,
-    // });
-    // if (!canAccess) {
-    //   res.status(403).json({ error: "Forbidden" });
-    //   return;
-    // }
 
     const response = await objectStorageService.downloadObject(objectFile);
 

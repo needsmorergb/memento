@@ -412,6 +412,46 @@ router.get("/events/:eventId/video-status", async (req, res) => {
   }
 });
 
+// Get QR payload for an event (host only)
+// Returns the join URL and share token to be encoded into a QR code
+router.get(
+  "/events/:eventId/qr-payload",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const event = await db.query.eventsTable.findFirst({
+        where: and(
+          eq(eventsTable.id, String(req.params.eventId)),
+          isNull(eventsTable.deletedAt),
+        ),
+      });
+
+      if (!event) {
+        res.status(404).json({ error: "Event not found" });
+        return;
+      }
+
+      if (event.hostId !== req.dbUser!.id) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
+      const shareUrl = buildShareUrl(event.shareToken);
+
+      res.json({
+        shareToken: event.shareToken,
+        shareUrl,
+        qrData: shareUrl,
+        eventId: event.id,
+        eventTitle: event.title,
+      });
+    } catch (err) {
+      req.log.error(err, "Failed to get QR payload");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
 // Get event by share token (public)
 router.get("/events/token/:shareToken", async (req, res) => {
   try {

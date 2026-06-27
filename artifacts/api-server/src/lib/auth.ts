@@ -1,9 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { getAuth } from "@clerk/express";
 import { db } from "@workspace/db";
-import { usersTable } from "@workspace/db/schema";
+import { usersTable, eventGuestsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { eventGuestsTable } from "@workspace/db/schema";
 
 export interface AuthenticatedRequest extends Request {
   dbUser?: typeof usersTable.$inferSelect;
@@ -46,6 +45,36 @@ export async function requireAuth(
   }
 
   req.dbUser = user;
+  next();
+}
+
+/**
+ * Tries both Clerk auth and guest token. Sets dbUser and/or guestRecord if found.
+ * Does NOT reject the request — access enforcement is done downstream.
+ */
+export async function optionalAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  // Try Clerk auth
+  const { userId } = getAuth(req);
+  if (userId) {
+    const user = await db.query.usersTable.findFirst({
+      where: eq(usersTable.clerkId, userId),
+    });
+    if (user) req.dbUser = user;
+  }
+
+  // Try guest token
+  const guestToken = req.headers["x-guest-token"] as string | undefined;
+  if (guestToken) {
+    const guest = await db.query.eventGuestsTable.findFirst({
+      where: eq(eventGuestsTable.guestToken, guestToken),
+    });
+    if (guest) req.guestRecord = guest;
+  }
+
   next();
 }
 

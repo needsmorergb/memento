@@ -4,8 +4,10 @@ import {
   eventsTable,
   eventGuestsTable,
   vendorCodesTable,
+  usersTable,
 } from "@workspace/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
+import { getAuth } from "@clerk/express";
 import { requireGuestAuth, type AuthenticatedRequest } from "../lib/auth";
 import crypto from "crypto";
 
@@ -15,7 +17,9 @@ function generateGuestToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-// Join an event
+// Join an event.
+// Works for both anonymous guests and authenticated users (Clerk session).
+// If the requester has a Clerk session, their userId is linked to the guest record.
 router.post("/guests/join", async (req, res) => {
   try {
     const { shareToken, displayName, email, phone, referralCode } =
@@ -44,6 +48,18 @@ router.post("/guests/join", async (req, res) => {
       return;
     }
 
+    // Optionally link authenticated Clerk user to the guest record
+    let linkedUserId: string | undefined;
+    const { userId: clerkUserId } = getAuth(req as any);
+    if (clerkUserId) {
+      const existingUser = await db.query.usersTable.findFirst({
+        where: eq(usersTable.clerkId, clerkUserId),
+      });
+      if (existingUser) {
+        linkedUserId = existingUser.id;
+      }
+    }
+
     let vendorCodeId: string | undefined;
     let vendorBenefit = false;
 
@@ -65,6 +81,7 @@ router.post("/guests/join", async (req, res) => {
       .insert(eventGuestsTable)
       .values({
         eventId: event.id,
+        userId: linkedUserId,
         displayName,
         email,
         phone,
@@ -95,7 +112,6 @@ router.post("/guests/join", async (req, res) => {
         status: event.status,
         hostName: host?.displayName ?? null,
         coverImagePath: event.coverImagePath,
-        guestCount: 0,
       },
     });
   } catch (err) {

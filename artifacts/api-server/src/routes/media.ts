@@ -7,7 +7,7 @@ import {
 } from "@workspace/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import {
-  optionalGuestAuth,
+  optionalAuth,
   type AuthenticatedRequest,
 } from "../lib/auth";
 
@@ -18,9 +18,11 @@ function buildMediaUrl(objectPath: string): string {
 }
 
 // List event media
+// Requires the caller to be either the event host (Clerk auth) or a guest for this event (guest token)
+// Optional ?guestId=<id> filter to view a single guest's uploads
 router.get(
   "/events/:eventId/media",
-  optionalGuestAuth,
+  optionalAuth,
   async (req: AuthenticatedRequest, res) => {
     try {
       const event = await db.query.eventsTable.findFirst({
@@ -35,11 +37,29 @@ router.get(
         return;
       }
 
+      // Access control: host or a guest belonging to this event
+      const isHost = req.dbUser && req.dbUser.id === event.hostId;
+      const isEventGuest =
+        req.guestRecord && req.guestRecord.eventId === event.id;
+
+      if (!isHost && !isEventGuest) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+
+      // Optional per-guest filter
+      const filterGuestId = req.query.guestId as string | undefined;
+
+      const whereConditions = [
+        eq(mediaItemsTable.eventId, event.id),
+        isNull(mediaItemsTable.deletedAt),
+        ...(filterGuestId
+          ? [eq(mediaItemsTable.guestId, filterGuestId)]
+          : []),
+      ];
+
       const items = await db.query.mediaItemsTable.findMany({
-        where: and(
-          eq(mediaItemsTable.eventId, event.id),
-          isNull(mediaItemsTable.deletedAt),
-        ),
+        where: and(...(whereConditions as [ReturnType<typeof eq>, ...ReturnType<typeof eq>[]])),
         orderBy: [desc(mediaItemsTable.createdAt)],
       });
 
@@ -59,6 +79,7 @@ router.get(
             : null,
           mediaType: item.mediaType,
           objectPath: item.objectPath,
+          mediaUrl: buildMediaUrl(item.objectPath),
           fileName: item.fileName,
           fileSizeBytes: item.fileSizeBytes,
           durationSeconds: item.durationSeconds,
@@ -73,9 +94,10 @@ router.get(
 );
 
 // Confirm media upload (create record after successful storage upload)
+// Requires a valid guest token for this event, or host auth
 router.post(
   "/events/:eventId/media",
-  optionalGuestAuth,
+  optionalAuth,
   async (req: AuthenticatedRequest, res) => {
     try {
       const event = await db.query.eventsTable.findFirst({
@@ -87,6 +109,16 @@ router.post(
 
       if (!event) {
         res.status(404).json({ error: "Event not found" });
+        return;
+      }
+
+      // Access control: host or a guest belonging to this event
+      const isHost = req.dbUser && req.dbUser.id === event.hostId;
+      const isEventGuest =
+        req.guestRecord && req.guestRecord.eventId === event.id;
+
+      if (!isHost && !isEventGuest) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
 
@@ -137,6 +169,7 @@ router.post(
         uploaderDisplayName,
         mediaType: item.mediaType,
         objectPath: item.objectPath,
+        mediaUrl: buildMediaUrl(item.objectPath),
         fileName: item.fileName,
         fileSizeBytes: item.fileSizeBytes,
         durationSeconds: item.durationSeconds,
