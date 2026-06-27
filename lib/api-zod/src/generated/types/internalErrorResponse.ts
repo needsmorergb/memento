@@ -5,7 +5,9 @@
  * Memento — Event media sharing and same-day edit API
  * OpenAPI spec version: 0.1.0
  */
+import type { ErrorEnvelope } from './errorEnvelope';
 
-export interface HealthStatus {
-  status: string;
-}
+/**
+ * Internal server error
+ */
+export type InternalErrorResponse = ErrorEnvelope;

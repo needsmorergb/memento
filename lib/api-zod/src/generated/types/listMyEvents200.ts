@@ -5,7 +5,8 @@
  * Memento — Event media sharing and same-day edit API
  * OpenAPI spec version: 0.1.0
  */
+import type { EventSummary } from './eventSummary';
 
-export interface HealthStatus {
-  status: string;
-}
+export type ListMyEvents200 = {
+  events: EventSummary[];
+};

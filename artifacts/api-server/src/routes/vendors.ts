@@ -1,0 +1,108 @@
+import { Router } from "express";
+import { db } from "@workspace/db";
+import { usersTable, vendorCodesTable } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
+import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
+import crypto from "crypto";
+
+const router = Router();
+
+function generateReferralCode(businessName: string): string {
+  const slug = businessName
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 6);
+  const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+  return `${slug}-${suffix}`;
+}
+
+function buildJoinUrl(code: string): string {
+  const domain = process.env.REPLIT_DEV_DOMAIN
+    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+    : "http://localhost:3000";
+  return `${domain}/join?ref=${code}`;
+}
+
+// Register as vendor
+router.post(
+  "/vendors/register",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const user = req.dbUser!;
+      const { businessName, benefitDescription } = req.body as {
+        businessName: string;
+        benefitDescription?: string;
+      };
+
+      if (!businessName) {
+        res.status(400).json({ error: "businessName is required" });
+        return;
+      }
+
+      // Mark user as vendor
+      await db
+        .update(usersTable)
+        .set({ isVendor: true, vendorBusinessName: businessName, updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+
+      // Create referral code if one doesn't exist
+      let vendorCode = await db.query.vendorCodesTable.findFirst({
+        where: eq(vendorCodesTable.userId, user.id),
+      });
+
+      if (!vendorCode) {
+        const code = generateReferralCode(businessName);
+        [vendorCode] = await db
+          .insert(vendorCodesTable)
+          .values({
+            userId: user.id,
+            code,
+            benefitDescription,
+            videoDurationCapSeconds: 180,
+          })
+          .returning();
+      }
+
+      res.json({
+        isVendor: true,
+        businessName,
+        referralCode: vendorCode.code,
+      });
+    } catch (err) {
+      req.log.error(err, "Failed to register vendor");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+// Get vendor referral code
+router.get(
+  "/vendors/referral-code",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const user = req.dbUser!;
+      const vendorCode = await db.query.vendorCodesTable.findFirst({
+        where: eq(vendorCodesTable.userId, user.id),
+      });
+
+      if (!vendorCode) {
+        res.status(404).json({ error: "No referral code found — register as a vendor first" });
+        return;
+      }
+
+      res.json({
+        code: vendorCode.code,
+        joinUrl: buildJoinUrl(vendorCode.code),
+        benefitDescription: vendorCode.benefitDescription,
+        videoDurationCapSeconds: vendorCode.videoDurationCapSeconds,
+      });
+    } catch (err) {
+      req.log.error(err, "Failed to get referral code");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+export default router;

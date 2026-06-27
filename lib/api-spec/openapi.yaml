@@ -1,22 +1,37 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Memento — Event media sharing and same-day edit API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: users
+    description: User profile management
+  - name: events
+    description: Event creation and management
+  - name: guests
+    description: Guest join and management
+  - name: media
+    description: Media upload and retrieval
+  - name: subscriptions
+    description: Subscription tier management
+  - name: vendors
+    description: Vendor registration and referral codes
+  - name: video
+    description: Video job status
+  - name: storage
+    description: Object storage upload and serving
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +39,905 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ── Users ──────────────────────────────────────────────────────────────────
+
+  /users/me:
+    get:
+      operationId: getMe
+      tags: [users]
+      summary: Get current user profile
+      security:
+        - clerkAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      operationId: updateMe
+      tags: [users]
+      summary: Update current user profile
+      security:
+        - clerkAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Events ─────────────────────────────────────────────────────────────────
+
+  /events:
+    get:
+      operationId: listMyEvents
+      tags: [events]
+      summary: List all events for the current host
+      security:
+        - clerkAuth: []
+      responses:
+        "200":
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EventSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createEvent
+      tags: [events]
+      summary: Create a new event
+      security:
+        - clerkAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEventRequest"
+      responses:
+        "201":
+          description: Event created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /events/{eventId}:
+    get:
+      operationId: getEvent
+      tags: [events]
+      summary: Get event details
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: Event detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateEvent
+      tags: [events]
+      summary: Update an event
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEventRequest"
+      responses:
+        "200":
+          description: Updated event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteEvent
+      tags: [events]
+      summary: Delete an event
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /events/{eventId}/end:
+    post:
+      operationId: endEvent
+      tags: [events]
+      summary: End an event and trigger video generation
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: Event ended and video job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJobStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /events/{eventId}/guests:
+    get:
+      operationId: listEventGuests
+      tags: [events]
+      summary: List guests for an event (host only)
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: Guest list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [guests]
+                properties:
+                  guests:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GuestSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /events/{eventId}/video-status:
+    get:
+      operationId: getEventVideoStatus
+      tags: [video]
+      summary: Get the video job status for an event
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: Video job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJobStatus"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Public Event (by token) ─────────────────────────────────────────────────
+
+  /events/token/{shareToken}:
+    get:
+      operationId: getEventByToken
+      tags: [events]
+      summary: Get public event info by share token
+      parameters:
+        - name: shareToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public event info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicEventInfo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Guests ─────────────────────────────────────────────────────────────────
+
+  /guests/join:
+    post:
+      operationId: joinEvent
+      tags: [guests]
+      summary: Join an event as a guest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinEventRequest"
+      responses:
+        "201":
+          description: Joined successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinEventResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /guests/me:
+    patch:
+      operationId: updateGuest
+      tags: [guests]
+      summary: Update guest info (push token, etc.)
+      parameters:
+        - name: X-Guest-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateGuestRequest"
+      responses:
+        "200":
+          description: Updated guest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuestSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Media ──────────────────────────────────────────────────────────────────
+
+  /events/{eventId}/media:
+    get:
+      operationId: listEventMedia
+      tags: [media]
+      summary: List all media for an event
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+        - name: X-Guest-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Media list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [media]
+                properties:
+                  media:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MediaItem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: confirmMediaUpload
+      tags: [media]
+      summary: Confirm a media upload and create the record
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+        - name: X-Guest-Token
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmMediaUploadRequest"
+      responses:
+        "201":
+          description: Media record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Subscriptions ──────────────────────────────────────────────────────────
+
+  /subscriptions/me:
+    get:
+      operationId: getMySubscription
+      tags: [subscriptions]
+      summary: Get current user subscription
+      security:
+        - clerkAuth: []
+      responses:
+        "200":
+          description: Subscription info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Vendors ────────────────────────────────────────────────────────────────
+
+  /vendors/register:
+    post:
+      operationId: registerVendor
+      tags: [vendors]
+      summary: Register the current user as a vendor
+      security:
+        - clerkAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterVendorRequest"
+      responses:
+        "200":
+          description: Vendor registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /vendors/referral-code:
+    get:
+      operationId: getVendorReferralCode
+      tags: [vendors]
+      summary: Get the vendor's referral code
+      security:
+        - clerkAuth: []
+      responses:
+        "200":
+          description: Vendor referral code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorCodeInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Storage ────────────────────────────────────────────────────────────────
+
+  /storage/uploads/request-url:
+    post:
+      tags: [storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /storage/public-objects/{filePath}:
+    get:
+      tags: [storage]
+      operationId: getPublicObject
+      summary: Serve a public asset
+      parameters:
+        - name: filePath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object content
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [storage]
+      operationId: getStorageObject
+      summary: Serve a private object
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object content
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
+  securitySchemes:
+    clerkAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    eventId:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    UserProfile:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clerkId:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        isVendor:
+          type: boolean
+        vendorBusinessName:
+          type: string
+          nullable: true
+        subscriptionTier:
+          type: string
+          enum: [free, pro, vendor]
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+
+    EventSummary:
+      type: object
+      required: [id, title, eventDate, status, shareToken, guestCount, mediaCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        eventDate:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [upcoming, live, ended]
+        shareToken:
+          type: string
+        shareUrl:
+          type: string
+        guestCount:
+          type: integer
+        mediaCount:
+          type: integer
+        coverImagePath:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    EventDetail:
+      allOf:
+        - $ref: "#/components/schemas/EventSummary"
+        - type: object
+          properties:
+            hostId:
+              type: string
+              format: uuid
+            hostName:
+              type: string
+              nullable: true
+            videoJob:
+              $ref: "#/components/schemas/VideoJobStatus"
+              nullable: true
+
+    PublicEventInfo:
+      type: object
+      required: [id, title, eventDate, status, hostName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        eventDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [upcoming, live, ended]
+        hostName:
+          type: string
+          nullable: true
+        coverImagePath:
+          type: string
+          nullable: true
+        guestCount:
+          type: integer
+
+    CreateEventRequest:
+      type: object
+      required: [title, eventDate]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        eventDate:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        coverImagePath:
+          type: string
+
+    UpdateEventRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        eventDate:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [upcoming, live, ended]
+        coverImagePath:
+          type: string
+
+    GuestSummary:
+      type: object
+      required: [id, displayName, joinedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+          nullable: true
+        guestToken:
+          type: string
+        vendorBenefit:
+          type: boolean
+        joinedAt:
+          type: string
+          format: date-time
+
+    JoinEventRequest:
+      type: object
+      required: [shareToken, displayName]
+      properties:
+        shareToken:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        referralCode:
+          type: string
+
+    JoinEventResponse:
+      type: object
+      required: [guest, event]
+      properties:
+        guest:
+          $ref: "#/components/schemas/GuestSummary"
+        event:
+          $ref: "#/components/schemas/PublicEventInfo"
+
+    UpdateGuestRequest:
+      type: object
+      properties:
+        pushToken:
+          type: string
+        email:
+          type: string
+        displayName:
+          type: string
+
+    MediaItem:
+      type: object
+      required: [id, eventId, mediaType, objectPath, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        guestId:
+          type: string
+          format: uuid
+          nullable: true
+        uploaderDisplayName:
+          type: string
+          nullable: true
+        mediaType:
+          type: string
+          enum: [photo, video, voice_note]
+        objectPath:
+          type: string
+        fileName:
+          type: string
+          nullable: true
+        fileSizeBytes:
+          type: integer
+          nullable: true
+        durationSeconds:
+          type: integer
+          nullable: true
+        thumbnailPath:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ConfirmMediaUploadRequest:
+      type: object
+      required: [objectPath, mediaType]
+      properties:
+        objectPath:
+          type: string
+        mediaType:
+          type: string
+          enum: [photo, video, voice_note]
+        fileName:
+          type: string
+        fileSizeBytes:
+          type: integer
+        durationSeconds:
+          type: integer
+        thumbnailPath:
+          type: string
+
+    SubscriptionInfo:
+      type: object
+      required: [tier, status]
+      properties:
+        tier:
+          type: string
+          enum: [free, pro, vendor]
+        status:
+          type: string
+        stripeSubscriptionId:
+          type: string
+          nullable: true
+        currentPeriodEnd:
+          type: string
+          format: date-time
+          nullable: true
+        videoDurationCapSeconds:
+          type: integer
+
+    RegisterVendorRequest:
+      type: object
+      required: [businessName]
+      properties:
+        businessName:
+          type: string
+        benefitDescription:
+          type: string
+
+    VendorInfo:
+      type: object
+      required: [isVendor, businessName]
+      properties:
+        isVendor:
+          type: boolean
+        businessName:
+          type: string
+          nullable: true
+        referralCode:
+          type: string
+          nullable: true
+
+    VendorCodeInfo:
+      type: object
+      required: [code, joinUrl]
+      properties:
+        code:
+          type: string
+        joinUrl:
+          type: string
+        benefitDescription:
+          type: string
+          nullable: true
+        videoDurationCapSeconds:
+          type: integer
+
+    VideoJobStatus:
+      type: object
+      required: [id, eventId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        videoUrl:
+          type: string
+          nullable: true
+        durationCapSeconds:
+          type: integer
+        tier:
+          type: string
+          enum: [free, pro, vendor]
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/UploadUrlRequest"
