@@ -1,8 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
-import React, { useRef, useState } from "react";
+import * as Notifications from "expo-notifications";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,25 +20,44 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEvent } from "@/context/EventContext";
 import { useColors } from "@/hooks/useColors";
-import { useJoinEvent } from "@workspace/api-client-react";
+import {
+  updateGuest,
+  useJoinEvent,
+} from "@workspace/api-client-react";
 
 type Tab = "qr" | "code";
 
-function extractShareToken(scanned: string): string | null {
+function extractShareToken(raw: string): string | null {
+  const trimmed = raw.trim();
   try {
-    const url = new URL(scanned);
+    const url = new URL(trimmed);
     const parts = url.pathname.split("/").filter(Boolean);
     const joinIdx = parts.indexOf("join");
-    if (joinIdx >= 0 && parts[joinIdx + 1]) {
-      return parts[joinIdx + 1];
-    }
+    if (joinIdx >= 0 && parts[joinIdx + 1]) return parts[joinIdx + 1];
     const tokenIdx = parts.indexOf("token");
-    if (tokenIdx >= 0 && parts[tokenIdx + 1]) {
-      return parts[tokenIdx + 1];
-    }
+    if (tokenIdx >= 0 && parts[tokenIdx + 1]) return parts[tokenIdx + 1];
+    const q = url.searchParams.get("token") ?? url.searchParams.get("t");
+    if (q) return q;
     return parts[parts.length - 1] || null;
   } catch {
-    return scanned.trim() || null;
+    return trimmed || null;
+  }
+}
+
+async function registerPushTokenIfAllowed(): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    let finalStatus = status;
+    if (status !== "granted") {
+      const { status: s } = await Notifications.requestPermissionsAsync();
+      finalStatus = s;
+    }
+    if (finalStatus !== "granted") return null;
+    const token = await Notifications.getExpoPushTokenAsync();
+    return token.data;
+  } catch {
+    return null;
   }
 }
 
@@ -45,8 +65,10 @@ export default function JoinScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { setEvent } = useEvent();
-  const [tab, setTab] = useState<Tab>("qr");
-  const [manualCode, setManualCode] = useState("");
+  const params = useLocalSearchParams<{ prefillToken?: string }>();
+
+  const [tab, setTab] = useState<Tab>(params.prefillToken ? "code" : "qr");
+  const [manualCode, setManualCode] = useState(params.prefillToken ?? "");
   const [guestName, setGuestName] = useState("");
   const [scanned, setScanned] = useState(false);
   const [pendingToken, setPendingToken] = useState<string | null>(null);
@@ -59,6 +81,13 @@ export default function JoinScreen() {
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
 
+  useEffect(() => {
+    if (params.prefillToken) {
+      setManualCode(params.prefillToken);
+      setTab("code");
+    }
+  }, [params.prefillToken]);
+
   const doJoin = (shareToken: string, name: string) => {
     if (!name.trim()) {
       Alert.alert("Name required", "Please enter your name to join.");
@@ -67,8 +96,14 @@ export default function JoinScreen() {
     joinMutation.mutate(
       { data: { shareToken: shareToken.trim(), displayName: name.trim() } },
       {
-        onSuccess: (res) => {
+        onSuccess: async (res) => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+          const isHost =
+            !!res.event.hostName &&
+            res.guest.displayName.toLowerCase().trim() ===
+              res.event.hostName.toLowerCase().trim();
+
           setEvent({
             eventId: res.event.id,
             shareToken,
@@ -78,7 +113,18 @@ export default function JoinScreen() {
             eventTitle: res.event.title,
             eventStatus: res.event.status,
             hostId: null,
+            isHost,
+            eventHostName: res.event.hostName ?? null,
           });
+
+          const pushToken = await registerPushTokenIfAllowed();
+          if (pushToken && res.guest.guestToken) {
+            updateGuest(
+              { pushToken },
+              { headers: { "X-Guest-Token": res.guest.guestToken } }
+            ).catch(() => {});
+          }
+
           router.replace("/(tabs)/feed");
         },
         onError: (err: unknown) => {
@@ -99,7 +145,7 @@ export default function JoinScreen() {
     setScanned(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setPendingToken(token);
-    nameInputRef.current?.focus();
+    setTimeout(() => nameInputRef.current?.focus(), 100);
   };
 
   const handleManualJoin = () => {
@@ -123,7 +169,6 @@ export default function JoinScreen() {
         </View>
       );
     }
-
     if (!permission.granted) {
       return (
         <View style={styles.center}>
@@ -157,132 +202,123 @@ export default function JoinScreen() {
       );
     }
 
-    return (
-      <View style={styles.qrContainer}>
-        {!pendingToken ? (
-          <>
-            <View style={styles.scannerWrap}>
-              <CameraView
-                style={StyleSheet.absoluteFill}
-                facing="back"
-                onBarcodeScanned={handleBarcode}
-                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+    if (!pendingToken) {
+      return (
+        <View style={styles.qrContainer}>
+          <View style={styles.scannerWrap}>
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              onBarcodeScanned={handleBarcode}
+              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            />
+            <View style={styles.overlay}>
+              <View
+                style={[styles.scanFrame, { borderColor: colors.primary }]}
               />
-              <View style={styles.overlay}>
-                <View
-                  style={[
-                    styles.scanFrame,
-                    { borderColor: colors.primary },
-                  ]}
-                />
-              </View>
             </View>
+          </View>
+          <Text
+            style={[
+              styles.scanHint,
+              { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+            ]}
+          >
+            Point your camera at the event QR code
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.nameSection}>
+        <View
+          style={[styles.successBadge, { backgroundColor: colors.muted }]}
+        >
+          <Feather name="check-circle" size={28} color={colors.primary} />
+          <Text
+            style={[
+              styles.successText,
+              { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
+            ]}
+          >
+            QR code scanned!
+          </Text>
+        </View>
+        <Text
+          style={[
+            styles.label,
+            { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
+          ]}
+        >
+          Your name
+        </Text>
+        <TextInput
+          ref={nameInputRef}
+          style={[
+            styles.input,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              color: colors.foreground,
+              fontFamily: "Outfit_400Regular",
+            },
+          ]}
+          placeholder="e.g. Alex"
+          placeholderTextColor={colors.mutedForeground}
+          value={guestName}
+          onChangeText={setGuestName}
+          returnKeyType="done"
+          onSubmitEditing={handleQRNameJoin}
+          autoFocus
+        />
+        <TouchableOpacity
+          style={[
+            styles.joinBtn,
+            {
+              backgroundColor: colors.primary,
+              opacity: joinMutation.isPending ? 0.6 : 1,
+            },
+          ]}
+          onPress={handleQRNameJoin}
+          disabled={joinMutation.isPending}
+          activeOpacity={0.8}
+        >
+          {joinMutation.isPending ? (
+            <ActivityIndicator color={colors.primaryForeground} />
+          ) : (
             <Text
               style={[
-                styles.scanHint,
+                styles.joinBtnText,
                 {
-                  color: colors.mutedForeground,
-                  fontFamily: "Outfit_400Regular",
-                },
-              ]}
-            >
-              Point your camera at the event QR code
-            </Text>
-          </>
-        ) : (
-          <View style={styles.nameSection}>
-            <View
-              style={[styles.successBadge, { backgroundColor: colors.muted }]}
-            >
-              <Feather name="check-circle" size={28} color={colors.primary} />
-              <Text
-                style={[
-                  styles.successText,
-                  {
-                    color: colors.foreground,
-                    fontFamily: "Outfit_600SemiBold",
-                  },
-                ]}
-              >
-                QR code scanned!
-              </Text>
-            </View>
-            <Text
-              style={[
-                styles.label,
-                {
-                  color: colors.foreground,
+                  color: colors.primaryForeground,
                   fontFamily: "Outfit_600SemiBold",
                 },
               ]}
             >
-              Your name
+              Join Event
             </Text>
-            <TextInput
-              ref={nameInputRef}
-              style={[
-                styles.input,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
-                  color: colors.foreground,
-                  fontFamily: "Outfit_400Regular",
-                },
-              ]}
-              placeholder="e.g. Alex"
-              placeholderTextColor={colors.mutedForeground}
-              value={guestName}
-              onChangeText={setGuestName}
-              returnKeyType="done"
-              onSubmitEditing={handleQRNameJoin}
-              autoFocus
-            />
-            <TouchableOpacity
-              style={[
-                styles.joinBtn,
-                {
-                  backgroundColor: colors.primary,
-                  opacity: joinMutation.isPending ? 0.6 : 1,
-                },
-              ]}
-              onPress={handleQRNameJoin}
-              disabled={joinMutation.isPending}
-              activeOpacity={0.8}
-            >
-              {joinMutation.isPending ? (
-                <ActivityIndicator color={colors.primaryForeground} />
-              ) : (
-                <Text
-                  style={[
-                    styles.joinBtnText,
-                    {
-                      color: colors.primaryForeground,
-                      fontFamily: "Outfit_600SemiBold",
-                    },
-                  ]}
-                >
-                  Join Event
-                </Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => {
-                setPendingToken(null);
-                setScanned(false);
-              }}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.rescanText,
-                  { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
-                ]}
-              >
-                Scan again
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            setPendingToken(null);
+            setScanned(false);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[
+              styles.rescanText,
+              {
+                color: colors.mutedForeground,
+                fontFamily: "Outfit_400Regular",
+              },
+            ]}
+          >
+            Scan again
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -400,9 +436,7 @@ export default function JoinScreen() {
         </Text>
       </View>
 
-      <View
-        style={[styles.tabBar, { borderBottomColor: colors.border }]}
-      >
+      <View style={[styles.tabBar, { borderBottomColor: colors.border }]}>
         {(["qr", "code"] as Tab[]).map((t) => (
           <TouchableOpacity
             key={t}
@@ -425,7 +459,8 @@ export default function JoinScreen() {
               style={[
                 styles.tabLabel,
                 {
-                  color: tab === t ? colors.primary : colors.mutedForeground,
+                  color:
+                    tab === t ? colors.primary : colors.mutedForeground,
                   fontFamily:
                     tab === t ? "Outfit_600SemiBold" : "Outfit_400Regular",
                 },
@@ -508,12 +543,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
 
-  nameSection: {
-    flex: 1,
-    padding: 24,
-    gap: 12,
-    width: "100%",
-  },
+  nameSection: { flex: 1, padding: 24, gap: 12, width: "100%" },
   successBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -526,10 +556,7 @@ const styles = StyleSheet.create({
   successText: { fontSize: 16 },
 
   codeContainer: { flex: 1 },
-  codeScroll: {
-    padding: 24,
-    gap: 8,
-  },
+  codeScroll: { padding: 24, gap: 8 },
 
   label: { fontSize: 15, marginBottom: 4 },
   input: {

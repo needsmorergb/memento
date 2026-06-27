@@ -1,11 +1,18 @@
 import { Feather } from "@expo/vector-icons";
 import { Audio } from "expo-av";
+import {
+  CameraType,
+  CameraView,
+  FlashMode,
+  useCameraPermissions,
+  useMicrophonePermissions,
+} from "expo-camera";
 import * as Haptics from "expo-haptics";
-import * as ImagePicker from "expo-image-picker";
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Platform,
   StyleSheet,
   Text,
@@ -23,27 +30,21 @@ import {
 
 type CaptureMode = "photo" | "video" | "voice";
 
-interface UploadState {
-  status: "idle" | "uploading" | "success" | "error";
-  progress?: string;
-  error?: string;
-}
+const { height: SCREEN_H } = Dimensions.get("window");
 
-async function putFile(
+async function putBlob(
   uploadURL: string,
   uri: string,
   contentType: string
 ): Promise<void> {
   const response = await globalThis.fetch(uri);
   const blob = await response.blob();
-  const putResponse = await globalThis.fetch(uploadURL, {
+  const put = await globalThis.fetch(uploadURL, {
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: blob,
   });
-  if (!putResponse.ok) {
-    throw new Error(`Upload failed: ${putResponse.status}`);
-  }
+  if (!put.ok) throw new Error(`Upload failed: ${put.status}`);
 }
 
 export default function CameraScreen() {
@@ -52,12 +53,22 @@ export default function CameraScreen() {
   const { eventId, guestToken, guestName, eventStatus } = useEvent();
 
   const [mode, setMode] = useState<CaptureMode>("photo");
-  const [uploadState, setUploadState] = useState<UploadState>({
-    status: "idle",
-  });
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [recordingDuration, setRecordingDuration] = useState(0);
-  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [cameraFacing, setCameraFacing] = useState<CameraType>("back");
+  const [flash, setFlash] = useState<FlashMode>("off");
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [videoTimer, setVideoTimer] = useState(0);
+  const [voiceRecording, setVoiceRecording] = useState<Audio.Recording | null>(null);
+  const [voiceTimer, setVoiceTimer] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState<
+    "idle" | "uploading" | "success" | "error"
+  >("idle");
+  const [uploadMsg, setUploadMsg] = useState("");
+
+  const cameraRef = useRef<CameraView>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [camPerm, requestCamPerm] = useCameraPermissions();
+  const [micPerm, requestMicPerm] = useMicrophonePermissions();
 
   const requestUploadUrl = useRequestUploadUrl({
     request: { headers: { "X-Guest-Token": guestToken ?? "" } },
@@ -68,8 +79,8 @@ export default function CameraScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
-
-  const isUploading = uploadState.status === "uploading";
+  const isUploading = uploadStatus === "uploading";
+  const eventEnded = eventStatus === "ended";
 
   const doUpload = useCallback(
     async (
@@ -84,29 +95,21 @@ export default function CameraScreen() {
         Alert.alert("No event", "You are not part of an event.");
         return;
       }
-      setUploadState({ status: "uploading", progress: "Preparing upload…" });
-
+      setUploadStatus("uploading");
+      setUploadMsg("Preparing…");
       try {
         const urlRes = await new Promise<{ uploadURL: string; objectPath: string }>(
-          (resolve, reject) => {
+          (res, rej) => {
             requestUploadUrl.mutate(
-              {
-                data: {
-                  name: fileName,
-                  size: fileSizeBytes ?? 1,
-                  contentType,
-                },
-              },
-              { onSuccess: resolve, onError: reject }
+              { data: { name: fileName, size: fileSizeBytes ?? 1, contentType } },
+              { onSuccess: res, onError: rej }
             );
           }
         );
-
-        setUploadState({ status: "uploading", progress: "Uploading…" });
-        await putFile(urlRes.uploadURL, uri, contentType);
-
-        setUploadState({ status: "uploading", progress: "Saving…" });
-        await new Promise<void>((resolve, reject) => {
+        setUploadMsg("Uploading…");
+        await putBlob(urlRes.uploadURL, uri, contentType);
+        setUploadMsg("Saving…");
+        await new Promise<void>((res, rej) => {
           confirmUpload.mutate(
             {
               eventId,
@@ -118,131 +121,89 @@ export default function CameraScreen() {
                 durationSeconds,
               },
             },
-            { onSuccess: () => resolve(), onError: reject }
+            { onSuccess: () => res(), onError: rej }
           );
         });
-
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setUploadState({ status: "success" });
-        setTimeout(() => setUploadState({ status: "idle" }), 2000);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Upload failed";
-        setUploadState({ status: "error", error: msg });
+        setUploadStatus("success");
+        setTimeout(() => setUploadStatus("idle"), 2500);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Upload failed";
+        setUploadStatus("error");
+        setUploadMsg(msg);
         Alert.alert("Upload failed", msg);
-        setTimeout(() => setUploadState({ status: "idle" }), 3000);
+        setTimeout(() => setUploadStatus("idle"), 3000);
       }
     },
     [eventId, requestUploadUrl, confirmUpload]
   );
 
-  const handlePickPhoto = async () => {
-    if (isUploading) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(
-        "Permission needed",
-        "Allow photo library access to upload photos."
-      );
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const name =
-      asset.fileName ?? `photo_${Date.now()}.jpg`;
-    await doUpload(
-      asset.uri,
-      name,
-      asset.mimeType ?? "image/jpeg",
-      "photo",
-      asset.fileSize
-    );
+  const startTimer = (setter: (v: number) => void) => {
+    setter(0);
+    timerRef.current = setInterval(() => setter((v) => v + 1), 1000);
   };
+  const stopTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+  };
+
+  const formatDur = (s: number) =>
+    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   const handleTakePhoto = async () => {
-    if (isUploading) return;
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow camera access to take photos.");
-      return;
+    if (isUploading || eventEnded || !cameraRef.current) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
+      if (!photo?.uri) return;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await doUpload(photo.uri, `photo_${Date.now()}.jpg`, "image/jpeg", "photo");
+    } catch (e) {
+      Alert.alert("Capture error", e instanceof Error ? e.message : "Failed");
     }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["images"],
-      quality: 0.85,
-      allowsEditing: false,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const name = `photo_${Date.now()}.jpg`;
-    await doUpload(
-      asset.uri,
-      name,
-      asset.mimeType ?? "image/jpeg",
-      "photo",
-      asset.fileSize
-    );
   };
 
-  const handlePickVideo = async () => {
-    if (isUploading) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert(
-        "Permission needed",
-        "Allow photo library access to upload videos."
-      );
-      return;
+  const handleStartVideo = async () => {
+    if (isUploading || eventEnded || !cameraRef.current || isRecordingVideo) return;
+    if (!micPerm?.granted) {
+      const res = await requestMicPerm();
+      if (!res.granted) {
+        Alert.alert("Permission needed", "Microphone access required for video.");
+        return;
+      }
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["videos"],
-      videoMaxDuration: 120,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const name = asset.fileName ?? `video_${Date.now()}.mp4`;
-    await doUpload(
-      asset.uri,
-      name,
-      asset.mimeType ?? "video/mp4",
-      "video",
-      asset.fileSize,
-      asset.duration ? Math.round(asset.duration / 1000) : undefined
-    );
+    try {
+      setIsRecordingVideo(true);
+      startTimer(setVideoTimer);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const video = await cameraRef.current.recordAsync({ maxDuration: 120 });
+      stopTimer();
+      setIsRecordingVideo(false);
+      setVideoTimer(0);
+      if (video?.uri) {
+        await doUpload(
+          video.uri,
+          `video_${Date.now()}.mp4`,
+          "video/mp4",
+          "video",
+          undefined,
+          videoTimer
+        );
+      }
+    } catch {
+      stopTimer();
+      setIsRecordingVideo(false);
+      setVideoTimer(0);
+    }
   };
 
-  const handleRecordVideo = async () => {
-    if (isUploading) return;
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow camera access to record video.");
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ["videos"],
-      videoMaxDuration: 120,
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const asset = result.assets[0];
-    const name = `video_${Date.now()}.mp4`;
-    await doUpload(
-      asset.uri,
-      name,
-      asset.mimeType ?? "video/mp4",
-      "video",
-      asset.fileSize,
-      asset.duration ? Math.round(asset.duration / 1000) : undefined
-    );
+  const handleStopVideo = () => {
+    cameraRef.current?.stopRecording();
   };
 
-  const startVoiceRecording = async () => {
-    if (isUploading || recording) return;
-    const perm = await Audio.requestPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow microphone access to record voice notes.");
+  const handleStartVoice = async () => {
+    if (isUploading || eventEnded || voiceRecording) return;
+    const { status } = await Audio.requestPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Microphone access required.");
       return;
     }
     await Audio.setAudioModeAsync({
@@ -252,503 +213,422 @@ export default function CameraScreen() {
     const rec = new Audio.Recording();
     await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
     await rec.startAsync();
-    setRecording(rec);
-    setRecordingDuration(0);
+    setVoiceRecording(rec);
+    startTimer(setVoiceTimer);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    durationIntervalRef.current = setInterval(() => {
-      setRecordingDuration((d) => d + 1);
-    }, 1000);
   };
 
-  const stopVoiceRecording = async () => {
-    if (!recording) return;
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
-    }
-    const dur = recordingDuration;
-    await recording.stopAndUnloadAsync();
-    const uri = recording.getURI();
-    setRecording(null);
-    setRecordingDuration(0);
+  const handleStopVoice = async () => {
+    if (!voiceRecording) return;
+    const dur = voiceTimer;
+    stopTimer();
+    await voiceRecording.stopAndUnloadAsync();
+    const uri = voiceRecording.getURI();
+    setVoiceRecording(null);
+    setVoiceTimer(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (!uri) {
-      Alert.alert("Recording error", "Could not save recording.");
-      return;
-    }
-    await doUpload(
-      uri,
-      `voice_${Date.now()}.m4a`,
-      "audio/m4a",
-      "voice_note",
-      undefined,
-      dur
-    );
+    if (!uri) return;
+    await doUpload(uri, `voice_${Date.now()}.m4a`, "audio/m4a", "voice_note", undefined, dur);
   };
 
-  const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, "0")}`;
-  };
-
-  const eventEnded = eventStatus === "ended";
+  const needsCamPerm = mode !== "voice" && (!camPerm || !camPerm.granted);
 
   return (
-    <View
-      style={[
-        styles.root,
-        { backgroundColor: colors.background, paddingTop: topPad + 12 },
-      ]}
-    >
-      <Text
-        style={[
-          styles.heading,
-          { color: colors.foreground, fontFamily: "Outfit_700Bold" },
-        ]}
-      >
-        Add a Moment
-      </Text>
+    <View style={[styles.root, { backgroundColor: "#000" }]}>
+      {mode !== "voice" && !needsCamPerm && (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing={cameraFacing}
+          flash={flash}
+        />
+      )}
 
-      {eventEnded && (
+      {mode === "voice" && (
         <View
           style={[
-            styles.endedBanner,
-            { backgroundColor: colors.muted, borderColor: colors.border },
+            StyleSheet.absoluteFill,
+            { backgroundColor: colors.background },
+          ]}
+        />
+      )}
+
+      {needsCamPerm && mode !== "voice" && (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: colors.background, alignItems: "center", justifyContent: "center", gap: 16, padding: 32 },
           ]}
         >
-          <Feather name="info" size={16} color={colors.mutedForeground} />
+          <Feather name="camera-off" size={48} color={colors.mutedForeground} />
           <Text
             style={[
-              styles.endedText,
-              {
-                color: colors.mutedForeground,
-                fontFamily: "Outfit_400Regular",
-              },
+              styles.permText,
+              { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
             ]}
           >
-            This event has ended — new uploads are disabled.
+            Camera access is needed to capture moments.
+          </Text>
+          <TouchableOpacity
+            style={[styles.permBtn, { backgroundColor: colors.primary }]}
+            onPress={requestCamPerm}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.permBtnText, { color: colors.primaryForeground, fontFamily: "Outfit_600SemiBold" }]}>
+              Allow Camera
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View
+        style={[
+          styles.topBar,
+          { paddingTop: topPad + 8 },
+        ]}
+      >
+        <View style={styles.modeRow}>
+          {(["photo", "video", "voice"] as CaptureMode[]).map((m) => (
+            <TouchableOpacity
+              key={m}
+              onPress={() => setMode(m)}
+              style={[
+                styles.modeChip,
+                mode === m && { backgroundColor: "rgba(255,255,255,0.25)" },
+              ]}
+              activeOpacity={0.75}
+            >
+              <Text
+                style={[
+                  styles.modeText,
+                  {
+                    color: mode === m ? "#fff" : "rgba(255,255,255,0.6)",
+                    fontFamily:
+                      mode === m ? "Outfit_600SemiBold" : "Outfit_400Regular",
+                  },
+                ]}
+              >
+                {m === "photo" ? "Photo" : m === "video" ? "Video" : "Voice"}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {mode !== "voice" && (
+          <View style={styles.topControls}>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() =>
+                setFlash((f) => (f === "off" ? "on" : "off"))
+              }
+              activeOpacity={0.8}
+            >
+              <Feather
+                name={flash === "off" ? "zap-off" : "zap"}
+                size={22}
+                color="#fff"
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() =>
+                setCameraFacing((f) => (f === "back" ? "front" : "back"))
+              }
+              activeOpacity={0.8}
+            >
+              <Feather name="refresh-cw" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {(isRecordingVideo || voiceRecording) && (
+        <View style={styles.timerBadge}>
+          <View style={[styles.recDot, { backgroundColor: colors.destructive }]} />
+          <Text style={[styles.timerText, { fontFamily: "Outfit_700Bold" }]}>
+            {formatDur(isRecordingVideo ? videoTimer : voiceTimer)}
+          </Text>
+        </View>
+      )}
+
+      {uploadStatus !== "idle" && (
+        <View
+          style={[
+            styles.uploadBadge,
+            {
+              backgroundColor:
+                uploadStatus === "success"
+                  ? "#16a34a"
+                  : uploadStatus === "error"
+                  ? colors.destructive
+                  : "rgba(0,0,0,0.7)",
+            },
+          ]}
+        >
+          {uploadStatus === "uploading" ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Feather
+              name={uploadStatus === "success" ? "check" : "x"}
+              size={16}
+              color="#fff"
+            />
+          )}
+          <Text style={[styles.uploadText, { fontFamily: "Outfit_500Medium" }]}>
+            {uploadStatus === "uploading"
+              ? uploadMsg
+              : uploadStatus === "success"
+              ? "Uploaded!"
+              : "Upload failed"}
+          </Text>
+        </View>
+      )}
+
+      {eventEnded && (
+        <View style={styles.endedBanner}>
+          <Text style={[styles.endedText, { fontFamily: "Outfit_400Regular" }]}>
+            Event ended — uploads disabled
           </Text>
         </View>
       )}
 
       <View
         style={[
-          styles.modeBar,
-          { borderColor: colors.border, backgroundColor: colors.muted },
+          styles.bottomBar,
+          { paddingBottom: botPad + 90 },
         ]}
       >
-        {(["photo", "video", "voice"] as CaptureMode[]).map((m) => (
-          <TouchableOpacity
-            key={m}
-            style={[
-              styles.modeBtn,
-              mode === m && {
-                backgroundColor: colors.background,
-                shadowColor: "#000",
-                shadowOpacity: 0.06,
-                shadowRadius: 4,
-                elevation: 2,
-              },
-            ]}
-            onPress={() => setMode(m)}
-            activeOpacity={0.7}
-          >
-            <Feather
-              name={
-                m === "photo" ? "camera" : m === "video" ? "video" : "mic"
-              }
-              size={16}
-              color={mode === m ? colors.primary : colors.mutedForeground}
-            />
-            <Text
-              style={[
-                styles.modeBtnText,
-                {
-                  color: mode === m ? colors.primary : colors.mutedForeground,
-                  fontFamily:
-                    mode === m ? "Outfit_600SemiBold" : "Outfit_400Regular",
-                },
-              ]}
-            >
-              {m === "photo" ? "Photo" : m === "video" ? "Video" : "Voice"}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={[styles.content, { paddingBottom: botPad + 90 }]}>
-        {uploadState.status === "uploading" && (
-          <View
-            style={[
-              styles.uploadBar,
-              {
-                backgroundColor: colors.muted,
-                borderColor: colors.border,
-                borderRadius: colors.radius,
-              },
-            ]}
-          >
-            <ActivityIndicator size="small" color={colors.primary} />
-            <Text
-              style={[
-                styles.uploadText,
-                {
-                  color: colors.foreground,
-                  fontFamily: "Outfit_500Medium",
-                },
-              ]}
-            >
-              {uploadState.progress}
-            </Text>
-          </View>
-        )}
-
-        {uploadState.status === "success" && (
-          <View
-            style={[
-              styles.uploadBar,
-              {
-                backgroundColor: "#dcfce7",
-                borderColor: "#bbf7d0",
-                borderRadius: colors.radius,
-              },
-            ]}
-          >
-            <Feather name="check-circle" size={18} color="#16a34a" />
-            <Text
-              style={[
-                styles.uploadText,
-                { color: "#15803d", fontFamily: "Outfit_500Medium" },
-              ]}
-            >
-              Uploaded successfully!
-            </Text>
-          </View>
-        )}
-
         {mode === "photo" && (
-          <View style={styles.actionGrid}>
-            <ActionCard
-              colors={colors}
-              icon="camera"
-              label="Take Photo"
-              sub="Use your camera"
-              onPress={handleTakePhoto}
-              disabled={isUploading || eventEnded}
-            />
-            <ActionCard
-              colors={colors}
-              icon="image"
-              label="Choose Photo"
-              sub="From your library"
-              onPress={handlePickPhoto}
-              disabled={isUploading || eventEnded}
-            />
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.shutterBtn,
+              { opacity: isUploading || eventEnded || needsCamPerm ? 0.4 : 1 },
+            ]}
+            onPress={handleTakePhoto}
+            disabled={isUploading || eventEnded || needsCamPerm}
+            activeOpacity={0.8}
+          >
+            <View style={styles.shutterInner} />
+          </TouchableOpacity>
         )}
 
         {mode === "video" && (
-          <View style={styles.actionGrid}>
-            <ActionCard
-              colors={colors}
-              icon="video"
-              label="Record Video"
-              sub="Up to 2 minutes"
-              onPress={handleRecordVideo}
-              disabled={isUploading || eventEnded}
-            />
-            <ActionCard
-              colors={colors}
-              icon="film"
-              label="Choose Video"
-              sub="From your library"
-              onPress={handlePickVideo}
-              disabled={isUploading || eventEnded}
-            />
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.shutterBtn,
+              { opacity: isUploading || eventEnded || needsCamPerm ? 0.4 : 1 },
+            ]}
+            onPress={isRecordingVideo ? handleStopVideo : handleStartVideo}
+            disabled={isUploading || eventEnded || needsCamPerm}
+            activeOpacity={0.8}
+          >
+            {isRecordingVideo ? (
+              <View
+                style={[
+                  styles.stopSquare,
+                  { backgroundColor: colors.destructive },
+                ]}
+              />
+            ) : (
+              <View
+                style={[styles.shutterInner, { backgroundColor: colors.destructive }]}
+              />
+            )}
+          </TouchableOpacity>
         )}
 
         {mode === "voice" && (
-          <View style={styles.voiceSection}>
-            <View
+          <View style={styles.voiceCenter}>
+            <TouchableOpacity
               style={[
                 styles.voiceRing,
                 {
-                  borderColor: recording ? colors.destructive : colors.primary,
-                  backgroundColor: recording
-                    ? `${colors.destructive}15`
-                    : colors.muted,
+                  borderColor: voiceRecording
+                    ? colors.destructive
+                    : "rgba(255,255,255,0.4)",
+                  opacity: isUploading || eventEnded ? 0.4 : 1,
                 },
               ]}
+              onPress={voiceRecording ? handleStopVoice : handleStartVoice}
+              disabled={isUploading || eventEnded}
+              activeOpacity={0.8}
             >
-              <TouchableOpacity
+              <View
                 style={[
-                  styles.voiceMainBtn,
+                  styles.voiceBtn,
                   {
-                    backgroundColor: recording
+                    backgroundColor: voiceRecording
                       ? colors.destructive
                       : colors.primary,
-                    opacity: eventEnded ? 0.5 : 1,
                   },
                 ]}
-                onPress={recording ? stopVoiceRecording : startVoiceRecording}
-                disabled={isUploading || eventEnded}
-                activeOpacity={0.8}
               >
                 <Feather
-                  name={recording ? "square" : "mic"}
-                  size={36}
-                  color={colors.primaryForeground}
+                  name={voiceRecording ? "square" : "mic"}
+                  size={34}
+                  color="#fff"
                 />
-              </TouchableOpacity>
-            </View>
-
-            {recording ? (
-              <View style={styles.recordingInfo}>
-                <View
-                  style={[styles.recDot, { backgroundColor: colors.destructive }]}
-                />
-                <Text
-                  style={[
-                    styles.recTimer,
-                    {
-                      color: colors.foreground,
-                      fontFamily: "Outfit_700Bold",
-                    },
-                  ]}
-                >
-                  {formatDuration(recordingDuration)}
-                </Text>
-                <Text
-                  style={[
-                    styles.recHint,
-                    {
-                      color: colors.mutedForeground,
-                      fontFamily: "Outfit_400Regular",
-                    },
-                  ]}
-                >
-                  Tap the square to stop
-                </Text>
               </View>
-            ) : (
-              <Text
-                style={[
-                  styles.voiceHint,
-                  {
-                    color: colors.mutedForeground,
-                    fontFamily: "Outfit_400Regular",
-                  },
-                ]}
-              >
-                {eventEnded
-                  ? "Event has ended"
-                  : "Tap the mic to start recording"}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {!eventId && (
-          <View style={styles.noEventWrap}>
-            <Feather name="alert-circle" size={40} color={colors.mutedForeground} />
+            </TouchableOpacity>
             <Text
               style={[
-                styles.noEventText,
-                {
-                  color: colors.mutedForeground,
-                  fontFamily: "Outfit_400Regular",
-                },
+                styles.voiceHint,
+                { color: mode === "voice" ? colors.mutedForeground : "rgba(255,255,255,0.7)", fontFamily: "Outfit_400Regular" },
               ]}
             >
-              Join an event first to upload media.
+              {voiceRecording
+                ? "Tap to stop"
+                : eventEnded
+                ? "Event ended"
+                : "Tap to record"}
             </Text>
           </View>
         )}
-      </View>
 
-      <View
-        style={[
-          styles.nameTag,
-          { borderTopColor: colors.border, paddingBottom: botPad + 80 },
-        ]}
-      >
-        <Feather name="user" size={14} color={colors.mutedForeground} />
-        <Text
-          style={[
-            styles.nameTagText,
-            { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
-          ]}
-        >
-          Uploading as {guestName ?? "Guest"}
-        </Text>
+        <View style={styles.guestTag}>
+          <Feather name="user" size={13} color="rgba(255,255,255,0.5)" />
+          <Text
+            style={[
+              styles.guestText,
+              { fontFamily: "Outfit_400Regular" },
+            ]}
+          >
+            {guestName ?? "Guest"}
+          </Text>
+        </View>
       </View>
     </View>
   );
 }
 
-function ActionCard({
-  colors,
-  icon,
-  label,
-  sub,
-  onPress,
-  disabled,
-}: {
-  colors: ReturnType<typeof useColors>;
-  icon: keyof typeof Feather.glyphMap;
-  label: string;
-  sub: string;
-  onPress: () => void;
-  disabled: boolean;
-}) {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.actionCard,
-        {
-          backgroundColor: colors.card,
-          borderColor: colors.border,
-          borderRadius: colors.radius,
-          opacity: disabled ? 0.45 : 1,
-        },
-      ]}
-      onPress={onPress}
-      disabled={disabled}
-      activeOpacity={0.75}
-    >
-      <View
-        style={[
-          styles.actionIconWrap,
-          { backgroundColor: colors.muted },
-        ]}
-      >
-        <Feather name={icon} size={26} color={colors.primary} />
-      </View>
-      <Text
-        style={[
-          styles.actionLabel,
-          { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
-        ]}
-      >
-        {label}
-      </Text>
-      <Text
-        style={[
-          styles.actionSub,
-          { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
-        ]}
-      >
-        {sub}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  heading: { fontSize: 28, paddingHorizontal: 20, marginBottom: 16 },
-
-  endedBanner: {
+  topBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    gap: 12,
+    zIndex: 10,
+  },
+  modeRow: {
+    flexDirection: "row",
+    alignSelf: "center",
+    gap: 4,
+  },
+  modeChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  modeText: { fontSize: 14 },
+  topControls: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 16,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timerBadge: {
+    position: "absolute",
+    top: "50%",
+    alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginHorizontal: 20,
-    marginBottom: 12,
-    paddingHorizontal: 14,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 10,
+  },
+  recDot: { width: 10, height: 10, borderRadius: 5 },
+  timerText: { color: "#fff", fontSize: 22 },
+  uploadBadge: {
+    position: "absolute",
+    bottom: 160,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 20,
+    zIndex: 10,
   },
-  endedText: { fontSize: 13, flex: 1, lineHeight: 18 },
-
-  modeBar: {
-    flexDirection: "row",
-    marginHorizontal: 20,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 4,
-    marginBottom: 20,
+  uploadText: { color: "#fff", fontSize: 14 },
+  endedBanner: {
+    position: "absolute",
+    top: 120,
+    alignSelf: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    zIndex: 10,
   },
-  modeBtn: {
-    flex: 1,
-    flexDirection: "row",
+  endedText: { color: "#fff", fontSize: 13 },
+  bottomBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 9,
+    justifyContent: "flex-end",
+    gap: 16,
+    zIndex: 10,
   },
-  modeBtnText: { fontSize: 14 },
-
-  content: { flex: 1, paddingHorizontal: 20 },
-
-  uploadBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 14,
-    borderWidth: 1,
-    marginBottom: 16,
-  },
-  uploadText: { fontSize: 14 },
-
-  actionGrid: { flexDirection: "row", gap: 12 },
-  actionCard: {
-    flex: 1,
-    borderWidth: 1,
-    padding: 20,
-    gap: 10,
-    alignItems: "center",
-  },
-  actionIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  shutterBtn: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 4,
+    borderColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
   },
-  actionLabel: { fontSize: 15, textAlign: "center" },
-  actionSub: { fontSize: 12, textAlign: "center" },
-
-  voiceSection: { flex: 1, alignItems: "center", justifyContent: "center", gap: 28 },
+  shutterInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#fff",
+  },
+  stopSquare: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+  },
+  voiceCenter: { alignItems: "center", gap: 16 },
   voiceRing: {
-    width: 148,
-    height: 148,
-    borderRadius: 74,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     borderWidth: 3,
     alignItems: "center",
     justifyContent: "center",
   },
-  voiceMainBtn: {
+  voiceBtn: {
     width: 110,
     height: 110,
     borderRadius: 55,
     alignItems: "center",
     justifyContent: "center",
   },
-  recordingInfo: { alignItems: "center", gap: 8 },
-  recDot: { width: 10, height: 10, borderRadius: 5 },
-  recTimer: { fontSize: 40 },
-  recHint: { fontSize: 14 },
-  voiceHint: { fontSize: 15, textAlign: "center", paddingHorizontal: 32 },
-
-  noEventWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 14,
-  },
-  noEventText: { fontSize: 15, textAlign: "center", lineHeight: 22 },
-
-  nameTag: {
+  voiceHint: { fontSize: 14, textAlign: "center" },
+  guestTag: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 20,
-    paddingTop: 10,
+    gap: 5,
   },
-  nameTagText: { fontSize: 13 },
+  guestText: { color: "rgba(255,255,255,0.5)", fontSize: 13 },
+  permText: { fontSize: 15, textAlign: "center", lineHeight: 22 },
+  permBtn: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12 },
+  permBtnText: { fontSize: 16 },
 });

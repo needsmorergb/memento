@@ -16,6 +16,8 @@ interface EventState {
   eventTitle: string | null;
   eventStatus: "upcoming" | "live" | "ended" | null;
   hostId: string | null;
+  isHost: boolean;
+  eventHostName: string | null;
 }
 
 interface EventContextValue extends EventState {
@@ -34,9 +36,11 @@ const EMPTY_STATE: EventState = {
   eventTitle: null,
   eventStatus: null,
   hostId: null,
+  isHost: false,
+  eventHostName: null,
 };
 
-const STORAGE_KEY = "memento_event_state_v1";
+const STORAGE_KEY = "memento_event_state_v2";
 
 const EventContext = createContext<EventContextValue>({
   ...EMPTY_STATE,

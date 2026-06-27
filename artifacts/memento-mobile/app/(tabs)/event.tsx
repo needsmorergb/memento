@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,8 +18,8 @@ import { useEvent } from "@/context/EventContext";
 import { useColors } from "@/hooks/useColors";
 import {
   useEndEvent,
-  useGetEvent,
-  useGetEventVideoStatus,
+  useGetEventByToken,
+  useGetEventVideoStatusByToken,
 } from "@workspace/api-client-react";
 
 function InfoRow({
@@ -35,9 +35,7 @@ function InfoRow({
 }) {
   return (
     <View style={styles.infoRow}>
-      <View
-        style={[styles.infoIconWrap, { backgroundColor: colors.muted }]}
-      >
+      <View style={[styles.infoIconWrap, { backgroundColor: colors.muted }]}>
         <Feather name={icon} size={16} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
@@ -65,23 +63,30 @@ function InfoRow({
 export default function EventScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { eventId, guestToken, guestName, eventTitle, eventStatus, clearEvent } =
-    useEvent();
-  const [confirmLeave, setConfirmLeave] = useState(false);
+  const {
+    eventId,
+    shareToken,
+    guestName,
+    eventTitle,
+    eventStatus,
+    isHost,
+    eventHostName,
+    clearEvent,
+  } = useEvent();
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
 
-  const { data: eventData, isLoading: eventLoading } = useGetEvent(
-    eventId ?? "",
-    { query: { enabled: !!eventId, refetchInterval: 15000 } }
+  const { data: eventData, isLoading: eventLoading } = useGetEventByToken(
+    shareToken ?? "",
+    { query: { enabled: !!shareToken, refetchInterval: 15000 } }
   );
 
-  const { data: videoStatus, isLoading: videoLoading } = useGetEventVideoStatus(
-    eventId ?? "",
+  const { data: videoStatus } = useGetEventVideoStatusByToken(
+    shareToken ?? "",
     {
       query: {
-        enabled: !!eventId && eventStatus === "ended",
+        enabled: !!shareToken && eventStatus === "ended",
         refetchInterval: 20000,
       },
     }
@@ -108,14 +113,22 @@ export default function EventScreen() {
                     Haptics.NotificationFeedbackType.Success
                   );
                   Alert.alert(
-                    "Event ended",
-                    "Your highlight video is being compiled!"
+                    "Event ended!",
+                    "Your highlight video is being compiled. We'll notify you when it's ready."
                   );
                 },
                 onError: (err) => {
                   const msg =
                     err instanceof Error ? err.message : "Could not end event";
-                  Alert.alert("Error", msg);
+                  if (msg.includes("401") || msg.includes("403")) {
+                    Alert.alert(
+                      "Sign in required",
+                      "Host controls require you to sign in with your account. Please use the web app to end the event.",
+                      [{ text: "OK" }]
+                    );
+                  } else {
+                    Alert.alert("Error", msg);
+                  }
                 },
               }
             );
@@ -141,8 +154,6 @@ export default function EventScreen() {
 
   const event = eventData;
   const guestCount = event?.guestCount;
-  const mediaCount = event?.mediaCount;
-
   const eventDate = event?.eventDate
     ? new Date(event.eventDate).toLocaleDateString(undefined, {
         weekday: "long",
@@ -151,8 +162,6 @@ export default function EventScreen() {
         day: "numeric",
       })
     : null;
-
-  const isHost = false;
 
   return (
     <View
@@ -178,55 +187,75 @@ export default function EventScreen() {
           >
             {eventTitle ?? "My Event"}
           </Text>
-          {eventStatus && (
-            <View
-              style={[
-                styles.statusPill,
-                {
-                  backgroundColor:
-                    eventStatus === "live"
-                      ? "#dcfce7"
-                      : eventStatus === "ended"
-                      ? colors.muted
-                      : "#fef9c3",
-                },
-              ]}
-            >
+          <View style={styles.pillRow}>
+            {eventStatus && (
               <View
                 style={[
-                  styles.pillDot,
+                  styles.statusPill,
                   {
                     backgroundColor:
                       eventStatus === "live"
-                        ? "#16a34a"
+                        ? "#dcfce7"
                         : eventStatus === "ended"
-                        ? colors.mutedForeground
-                        : "#ca8a04",
-                  },
-                ]}
-              />
-              <Text
-                style={[
-                  styles.pillText,
-                  {
-                    color:
-                      eventStatus === "live"
-                        ? "#15803d"
-                        : eventStatus === "ended"
-                        ? colors.mutedForeground
-                        : "#854d0e",
-                    fontFamily: "Outfit_500Medium",
+                        ? colors.muted
+                        : "#fef9c3",
                   },
                 ]}
               >
-                {eventStatus === "live"
-                  ? "Live"
-                  : eventStatus === "ended"
-                  ? "Event Ended"
-                  : "Upcoming"}
-              </Text>
-            </View>
-          )}
+                <View
+                  style={[
+                    styles.pillDot,
+                    {
+                      backgroundColor:
+                        eventStatus === "live"
+                          ? "#16a34a"
+                          : eventStatus === "ended"
+                          ? colors.mutedForeground
+                          : "#ca8a04",
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.pillText,
+                    {
+                      color:
+                        eventStatus === "live"
+                          ? "#15803d"
+                          : eventStatus === "ended"
+                          ? colors.mutedForeground
+                          : "#854d0e",
+                      fontFamily: "Outfit_500Medium",
+                    },
+                  ]}
+                >
+                  {eventStatus === "live"
+                    ? "Live"
+                    : eventStatus === "ended"
+                    ? "Ended"
+                    : "Upcoming"}
+                </Text>
+              </View>
+            )}
+            {isHost && (
+              <View
+                style={[
+                  styles.hostPill,
+                  { backgroundColor: colors.primary + "20" },
+                ]}
+              >
+                <Feather name="star" size={12} color={colors.primary} />
+                <Text
+                  style={[
+                    styles.pillText,
+                    { color: colors.primary, fontFamily: "Outfit_600SemiBold" },
+                  ]}
+                >
+                  Host
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {eventLoading && !event ? (
@@ -261,11 +290,11 @@ export default function EventScreen() {
                 colors={colors}
               />
             )}
-            {mediaCount != null && (
+            {eventHostName && (
               <InfoRow
-                icon="image"
-                label="Moments"
-                value={`${mediaCount} uploaded`}
+                icon="user-check"
+                label="Host"
+                value={eventHostName}
                 colors={colors}
               />
             )}
@@ -284,11 +313,11 @@ export default function EventScreen() {
               styles.videoCard,
               {
                 backgroundColor:
-                  videoStatus.status === "completed"
-                    ? "#f0fdf4"
-                    : colors.muted,
+                  videoStatus.status === "completed" ? "#f0fdf4" : colors.muted,
                 borderColor:
-                  videoStatus.status === "completed" ? "#bbf7d0" : colors.border,
+                  videoStatus.status === "completed"
+                    ? "#bbf7d0"
+                    : colors.border,
                 borderRadius: colors.radius,
               },
             ]}
@@ -298,9 +327,7 @@ export default function EventScreen() {
                 name="film"
                 size={20}
                 color={
-                  videoStatus.status === "completed"
-                    ? "#16a34a"
-                    : colors.primary
+                  videoStatus.status === "completed" ? "#16a34a" : colors.primary
                 }
               />
               <Text
@@ -312,6 +339,7 @@ export default function EventScreen() {
                         ? "#15803d"
                         : colors.foreground,
                     fontFamily: "Outfit_600SemiBold",
+                    flex: 1,
                   },
                 ]}
               >
@@ -329,20 +357,43 @@ export default function EventScreen() {
               )}
             </View>
             {videoStatus.status === "completed" && videoStatus.videoUrl && (
-              <Text
+              <TouchableOpacity
                 style={[
-                  styles.videoSub,
-                  { color: "#16a34a", fontFamily: "Outfit_400Regular" },
+                  styles.watchBtn,
+                  { backgroundColor: "#16a34a" },
                 ]}
+                onPress={() => {
+                  if (videoStatus.videoUrl) {
+                    router.push({
+                      pathname: "/video",
+                      params: {
+                        url: videoStatus.videoUrl,
+                        title: eventTitle ?? "Highlight Video",
+                      },
+                    });
+                  }
+                }}
+                activeOpacity={0.8}
               >
-                Your highlight reel is ready to watch!
-              </Text>
+                <Feather name="play" size={16} color="#fff" />
+                <Text
+                  style={[
+                    styles.watchBtnText,
+                    { fontFamily: "Outfit_600SemiBold" },
+                  ]}
+                >
+                  Watch Video
+                </Text>
+              </TouchableOpacity>
             )}
             {videoStatus.status === "failed" && videoStatus.errorMessage && (
               <Text
                 style={[
                   styles.videoSub,
-                  { color: colors.destructive, fontFamily: "Outfit_400Regular" },
+                  {
+                    color: colors.destructive,
+                    fontFamily: "Outfit_400Regular",
+                  },
                 ]}
               >
                 {videoStatus.errorMessage}
@@ -390,6 +441,14 @@ export default function EventScreen() {
                 </>
               )}
             </TouchableOpacity>
+            <Text
+              style={[
+                styles.hostNote,
+                { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+              ]}
+            >
+              Host sign-in is required for this action.
+            </Text>
           </View>
         )}
 
@@ -427,10 +486,20 @@ const styles = StyleSheet.create({
 
   headerSection: { gap: 10 },
   eventTitle: { fontSize: 26, lineHeight: 32 },
+  pillRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  hostPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     alignSelf: "flex-start",
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -462,16 +531,21 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 12 },
   infoValue: { fontSize: 15, marginTop: 2 },
 
-  videoCard: {
-    borderWidth: 1,
-    padding: 16,
-    gap: 8,
-  },
+  videoCard: { borderWidth: 1, padding: 16, gap: 12 },
   videoCardHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
-  videoCardTitle: { fontSize: 15, flex: 1 },
-  videoSub: { fontSize: 13, lineHeight: 18, paddingLeft: 30 },
+  videoCardTitle: { fontSize: 15 },
+  videoSub: { fontSize: 13, lineHeight: 18 },
+  watchBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 46,
+    borderRadius: 10,
+  },
+  watchBtnText: { color: "#fff", fontSize: 15 },
 
-  hostSection: { gap: 12 },
+  hostSection: { gap: 8 },
   sectionLabel: { fontSize: 16 },
   endBtn: {
     flexDirection: "row",
@@ -482,6 +556,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   endBtnText: { color: "#fff", fontSize: 16 },
+  hostNote: { fontSize: 12, textAlign: "center" },
 
   leaveSection: { marginTop: 4 },
   leaveBtn: {
@@ -491,7 +566,6 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 50,
     borderWidth: 1,
-    borderRadius: 12,
   },
   leaveBtnText: { fontSize: 15 },
 });

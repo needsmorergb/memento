@@ -1,10 +1,13 @@
 import { Feather } from "@expo/vector-icons";
+import { Audio } from "expo-av";
+import { ResizeMode, Video } from "expo-av";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Platform,
   RefreshControl,
   StyleSheet,
@@ -16,10 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useEvent } from "@/context/EventContext";
 import { useColors } from "@/hooks/useColors";
-import {
-  MediaItem,
-  useListEventMedia,
-} from "@workspace/api-client-react";
+import { MediaItem, useListEventMedia } from "@workspace/api-client-react";
 
 const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN;
 
@@ -32,12 +32,263 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function VoiceNotePlayer({
+  uri,
+  colors,
+}: {
+  uri: string;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const togglePlay = async () => {
+    if (isLoading) return;
+    if (!sound) {
+      setIsLoading(true);
+      try {
+        const { sound: s } = await Audio.Sound.createAsync(
+          { uri },
+          { shouldPlay: true }
+        );
+        setSound(s);
+        setIsPlaying(true);
+        s.setOnPlaybackStatusUpdate((status) => {
+          if (status.isLoaded && status.didJustFinish) {
+            setIsPlaying(false);
+          }
+        });
+      } catch {
+        /* ignore */
+      } finally {
+        setIsLoading(false);
+      }
+    } else if (isPlaying) {
+      await sound.pauseAsync();
+      setIsPlaying(false);
+    } else {
+      await sound.playAsync();
+      setIsPlaying(true);
+    }
+  };
+
+  return (
+    <View
+      style={[
+        vpStyles.container,
+        { backgroundColor: colors.muted, borderRadius: colors.radius },
+      ]}
+    >
+      <TouchableOpacity
+        style={[vpStyles.btn, { backgroundColor: colors.primary }]}
+        onPress={togglePlay}
+        activeOpacity={0.8}
+      >
+        {isLoading ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Feather name={isPlaying ? "pause" : "play"} size={20} color="#fff" />
+        )}
+      </TouchableOpacity>
+      <View style={vpStyles.waveform}>
+        {Array.from({ length: 20 }).map((_, i) => (
+          <View
+            key={i}
+            style={[
+              vpStyles.bar,
+              {
+                height: 8 + (i % 5) * 6,
+                backgroundColor: isPlaying
+                  ? colors.primary
+                  : colors.border,
+              },
+            ]}
+          />
+        ))}
+      </View>
+      <Text
+        style={[
+          vpStyles.label,
+          { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+        ]}
+      >
+        Voice Note
+      </Text>
+    </View>
+  );
+}
+
+const vpStyles = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 16,
+    flex: 1,
+  },
+  btn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  waveform: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    height: 36,
+  },
+  bar: { width: 3, borderRadius: 2 },
+  label: { fontSize: 12 },
+});
+
+function FullscreenViewer({
+  item,
+  visible,
+  onClose,
+  colors,
+}: {
+  item: MediaItem | null;
+  visible: boolean;
+  onClose: () => void;
+  colors: ReturnType<typeof useColors>;
+}) {
+  if (!item) return null;
+  const url = mediaUrl(item.objectPath);
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={fsStyles.backdrop}>
+        <TouchableOpacity
+          style={fsStyles.closeBtn}
+          onPress={onClose}
+          activeOpacity={0.8}
+        >
+          <View style={fsStyles.closeBg}>
+            <Feather name="x" size={22} color="#fff" />
+          </View>
+        </TouchableOpacity>
+
+        {item.mediaType === "photo" && (
+          <Image
+            source={{ uri: url }}
+            style={fsStyles.fullMedia}
+            contentFit="contain"
+          />
+        )}
+
+        {item.mediaType === "video" && (
+          <Video
+            source={{ uri: url }}
+            style={fsStyles.fullMedia}
+            resizeMode={ResizeMode.CONTAIN}
+            useNativeControls
+            shouldPlay
+          />
+        )}
+
+        {item.mediaType === "voice_note" && (
+          <View style={fsStyles.voiceContainer}>
+            <View
+              style={[
+                fsStyles.voiceIcon,
+                { backgroundColor: colors.primary },
+              ]}
+            >
+              <Feather name="mic" size={40} color="#fff" />
+            </View>
+            <Text
+              style={[
+                fsStyles.voiceTitle,
+                { fontFamily: "Outfit_600SemiBold" },
+              ]}
+            >
+              Voice Note
+            </Text>
+            {item.durationSeconds != null && (
+              <Text
+                style={[
+                  fsStyles.voiceDur,
+                  { fontFamily: "Outfit_400Regular" },
+                ]}
+              >
+                {item.durationSeconds}s
+              </Text>
+            )}
+            <VoiceNotePlayer uri={url} colors={colors} />
+          </View>
+        )}
+
+        <View style={fsStyles.meta}>
+          <Text style={[fsStyles.metaName, { fontFamily: "Outfit_500Medium" }]}>
+            {item.uploaderDisplayName ?? "Guest"}
+          </Text>
+          <Text
+            style={[fsStyles.metaTime, { fontFamily: "Outfit_400Regular" }]}
+          >
+            {formatTime(item.createdAt)}
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const fsStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeBtn: { position: "absolute", top: 56, right: 20, zIndex: 10 },
+  closeBg: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullMedia: { width: "100%", height: "75%" },
+  voiceContainer: { alignItems: "center", gap: 16, paddingHorizontal: 32, width: "100%" },
+  voiceIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceTitle: { color: "#fff", fontSize: 20 },
+  voiceDur: { color: "rgba(255,255,255,0.6)", fontSize: 15 },
+  meta: {
+    position: "absolute",
+    bottom: 48,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    gap: 4,
+  },
+  metaName: { color: "#fff", fontSize: 16 },
+  metaTime: { color: "rgba(255,255,255,0.6)", fontSize: 13 },
+});
+
 function MediaCard({
   item,
   colors,
+  onPress,
 }: {
   item: MediaItem;
   colors: ReturnType<typeof useColors>;
+  onPress: () => void;
 }) {
   const isVoice = item.mediaType === "voice_note";
   const isVideo = item.mediaType === "video";
@@ -45,7 +296,7 @@ function MediaCard({
   const url = mediaUrl(item.objectPath);
 
   return (
-    <View
+    <TouchableOpacity
       style={[
         styles.card,
         {
@@ -54,6 +305,8 @@ function MediaCard({
           borderRadius: colors.radius,
         },
       ]}
+      onPress={onPress}
+      activeOpacity={0.85}
     >
       {isPhoto && (
         <Image
@@ -65,14 +318,15 @@ function MediaCard({
       )}
 
       {isVideo && (
-        <View style={[styles.cardImage, styles.videoPlaceholder, { backgroundColor: colors.muted }]}>
-          <View
-            style={[
-              styles.playBtn,
-              { backgroundColor: colors.primary },
-            ]}
-          >
-            <Feather name="play" size={24} color={colors.primaryForeground} />
+        <View
+          style={[
+            styles.cardImage,
+            styles.videoPlaceholder,
+            { backgroundColor: colors.muted },
+          ]}
+        >
+          <View style={[styles.playBtn, { backgroundColor: colors.primary }]}>
+            <Feather name="play" size={22} color={colors.primaryForeground} />
           </View>
         </View>
       )}
@@ -88,13 +342,8 @@ function MediaCard({
             },
           ]}
         >
-          <View
-            style={[
-              styles.voiceIcon,
-              { backgroundColor: colors.primary },
-            ]}
-          >
-            <Feather name="mic" size={20} color={colors.primaryForeground} />
+          <View style={[styles.voiceIcon, { backgroundColor: colors.primary }]}>
+            <Feather name="mic" size={18} color={colors.primaryForeground} />
           </View>
           <View style={{ flex: 1 }}>
             <Text
@@ -115,10 +364,11 @@ function MediaCard({
                   },
                 ]}
               >
-                {item.durationSeconds}s
+                {item.durationSeconds}s · tap to play
               </Text>
             )}
           </View>
+          <Feather name="play-circle" size={20} color={colors.primary} />
         </View>
       )}
 
@@ -141,7 +391,7 @@ function MediaCard({
           {formatTime(item.createdAt)}
         </Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -150,6 +400,8 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { eventId, guestToken, eventTitle, eventStatus } = useEvent();
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
+  const [viewerVisible, setViewerVisible] = useState(false);
 
   const { data, isLoading, error, refetch } = useListEventMedia(
     eventId ?? "",
@@ -172,6 +424,12 @@ export default function FeedScreen() {
     setRefreshing(false);
   }, [refetch]);
 
+  const openViewer = (item: MediaItem) => {
+    setSelectedItem(item);
+    setViewerVisible(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
 
@@ -190,7 +448,10 @@ export default function FeedScreen() {
           <Text
             style={[
               styles.emptyText,
-              { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+              {
+                color: colors.mutedForeground,
+                fontFamily: "Outfit_400Regular",
+              },
             ]}
           >
             Could not load media
@@ -236,9 +497,7 @@ export default function FeedScreen() {
   };
 
   return (
-    <View
-      style={[styles.root, { backgroundColor: colors.background }]}
-    >
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       <View
         style={[
           styles.header,
@@ -249,7 +508,7 @@ export default function FeedScreen() {
           },
         ]}
       >
-        <View>
+        <View style={{ flex: 1 }}>
           <Text
             style={[
               styles.eventTitle,
@@ -292,16 +551,14 @@ export default function FeedScreen() {
             </View>
           )}
         </View>
-        <View style={styles.mediaCount}>
-          <Text
-            style={[
-              styles.countText,
-              { color: colors.mutedForeground, fontFamily: "Outfit_500Medium" },
-            ]}
-          >
-            {media.length} {media.length === 1 ? "moment" : "moments"}
-          </Text>
-        </View>
+        <Text
+          style={[
+            styles.countText,
+            { color: colors.mutedForeground, fontFamily: "Outfit_500Medium" },
+          ]}
+        >
+          {media.length} {media.length === 1 ? "moment" : "moments"}
+        </Text>
       </View>
 
       <FlatList
@@ -323,7 +580,20 @@ export default function FeedScreen() {
           />
         }
         ListEmptyComponent={renderEmpty}
-        renderItem={({ item }) => <MediaCard item={item} colors={colors} />}
+        renderItem={({ item }) => (
+          <MediaCard
+            item={item}
+            colors={colors}
+            onPress={() => openViewer(item)}
+          />
+        )}
+      />
+
+      <FullscreenViewer
+        item={selectedItem}
+        visible={viewerVisible}
+        onClose={() => setViewerVisible(false)}
+        colors={colors}
       />
     </View>
   );
@@ -339,14 +609,18 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  eventTitle: { fontSize: 22, maxWidth: 220 },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+  eventTitle: { fontSize: 22 },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusText: { fontSize: 13 },
-  mediaCount: { alignItems: "flex-end" },
   countText: { fontSize: 13 },
 
-  list: { padding: 12, gap: 0 },
+  list: { padding: 12 },
   emptyList: { flex: 1 },
   row: { gap: 10, marginBottom: 10 },
 
@@ -359,29 +633,30 @@ const styles = StyleSheet.create({
   cardImage: { width: "100%", height: 160 },
   videoPlaceholder: { alignItems: "center", justifyContent: "center" },
   playBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
   },
   voiceCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    padding: 16,
+    gap: 10,
+    padding: 14,
     margin: 8,
     borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 60,
   },
   voiceIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
   },
-  voiceLabel: { fontSize: 15 },
-  voiceDuration: { fontSize: 13, marginTop: 2 },
+  voiceLabel: { fontSize: 14 },
+  voiceDuration: { fontSize: 12, marginTop: 2 },
   cardMeta: {
     flexDirection: "row",
     alignItems: "center",
