@@ -24,10 +24,11 @@ async function apiFetch<T>(
 
 export async function createCheckoutSession(
   plan: "pro" | "vendor",
+  interval?: "monthly" | "annual",
 ): Promise<string> {
   const { url } = await apiFetch<{ url: string }>("/billing/checkout", {
     method: "POST",
-    body: JSON.stringify({ plan }),
+    body: JSON.stringify({ plan, interval }),
   });
   return url;
 }
@@ -39,8 +40,11 @@ export async function createPortalSession(): Promise<string> {
   return url;
 }
 
-export async function redirectToCheckout(plan: "pro" | "vendor"): Promise<void> {
-  const url = await createCheckoutSession(plan);
+export async function redirectToCheckout(
+  plan: "pro" | "vendor",
+  interval?: "monthly" | "annual",
+): Promise<void> {
+  const url = await createCheckoutSession(plan, interval);
   window.location.href = url;
 }
 

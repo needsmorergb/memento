@@ -194,12 +194,25 @@ export default function VideoPlayback() {
                   {videoStatus.tier ?? "free"} tier · {capLabel} cap
                 </p>
               </div>
-              <a href={videoStatus.videoUrl} download>
-                <Button variant="outline" className="gap-1.5" data-testid="button-download-video">
+              {videoStatus.tier && videoStatus.tier !== "free" ? (
+                <a href={videoStatus.videoUrl} download>
+                  <Button variant="outline" className="gap-1.5" data-testid="button-download-video">
+                    <Download className="w-4 h-4" />
+                    Download
+                  </Button>
+                </a>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="gap-1.5 opacity-50 cursor-not-allowed"
+                  disabled
+                  data-testid="button-download-locked"
+                  title="Upgrade to Pro to download"
+                >
                   <Download className="w-4 h-4" />
-                  Download
+                  Pro only
                 </Button>
-              </a>
+              )}
             </div>
             <UpgradeBanner tier={videoStatus.tier} />
             <AppDownloadBanner />

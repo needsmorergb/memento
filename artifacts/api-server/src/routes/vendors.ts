@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable, referralCodesTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { usersTable, referralCodesTable, subscriptionsTable } from "@workspace/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { requireAuth, type AuthenticatedRequest } from "../lib/auth";
 import crypto from "crypto";
 
@@ -23,7 +23,7 @@ function buildJoinUrl(code: string): string {
   return `${domain}/join?ref=${code}`;
 }
 
-// Register as vendor
+// Register as vendor — saves businessName and redirects to Stripe checkout if not subscribed
 router.post(
   "/vendors/register",
   requireAuth,
@@ -40,13 +40,41 @@ router.post(
         return;
       }
 
-      // Mark user as vendor
+      // Always save businessName so it's ready when the subscription activates
       await db
         .update(usersTable)
-        .set({ isVendor: true, vendorBusinessName: businessName, updatedAt: new Date() })
+        .set({ vendorBusinessName: businessName, updatedAt: new Date() })
         .where(eq(usersTable.id, user.id));
 
-      // Create referral code if one doesn't exist
+      // Check for active vendor subscription before granting vendor capabilities
+      const subscription = await db.query.subscriptionsTable.findFirst({
+        where: and(
+          eq(subscriptionsTable.userId, user.id),
+          isNull(subscriptionsTable.deletedAt),
+        ),
+      });
+
+      const activeStatuses = ["active", "trialing"];
+      const hasActiveVendorSub =
+        subscription?.tier === "vendor" &&
+        subscription.status != null &&
+        activeStatuses.includes(subscription.status);
+
+      if (!hasActiveVendorSub) {
+        // Return a 402 with a clear message — client should redirect to billing checkout
+        res.status(402).json({
+          error: "A Vendor subscription is required to access vendor features.",
+          checkoutRequired: true,
+        });
+        return;
+      }
+
+      // Active subscription confirmed — grant vendor flag and referral code
+      await db
+        .update(usersTable)
+        .set({ isVendor: true, updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+
       let referralCode = await db.query.referralCodesTable.findFirst({
         where: eq(referralCodesTable.userId, user.id),
       });

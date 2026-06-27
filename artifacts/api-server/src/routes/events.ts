@@ -319,7 +319,13 @@ router.post("/events/:eventId/end", requireAuth, async (req: AuthenticatedReques
     const subscription = await db.query.subscriptionsTable.findFirst({
       where: eq(subscriptionsTable.userId, user.id),
     });
-    const tier = subscription?.tier ?? "free";
+    // Treat lapsed/past-due/cancelled subscriptions as free to avoid giving paid caps for free
+    const activeStatuses = ["active", "trialing"];
+    const effectiveTier =
+      subscription?.status && activeStatuses.includes(subscription.status)
+        ? (subscription.tier ?? "free")
+        : "free";
+    const tier = effectiveTier;
     const durationCap = getDurationCap(tier);
     const { quality, maxResolutionPx } = getQualityCap(tier);
 

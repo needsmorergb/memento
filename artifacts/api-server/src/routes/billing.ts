@@ -70,8 +70,27 @@ async function findOrCreateStripeCustomer(
 
 async function findPriceIdForTier(
   tier: "pro" | "vendor",
+  interval?: "monthly" | "annual",
 ): Promise<string | null> {
   try {
+    if (interval) {
+      const stripeInterval = interval === "annual" ? "year" : "month";
+      const result = await db.execute(sql`
+        SELECT pr.id
+        FROM stripe.prices pr
+        JOIN stripe.products p ON pr.product = p.id
+        WHERE p.metadata->>'tier' = ${tier}
+          AND pr.active = true
+          AND p.active = true
+          AND pr.recurring->>'interval' = ${stripeInterval}
+        ORDER BY pr.unit_amount ASC
+        LIMIT 1
+      `);
+      const id = (result.rows[0]?.id as string) ?? null;
+      if (id) return id;
+      // Fall through to cheapest if requested interval not found
+    }
+    // Default: cheapest active price for tier (monthly)
     const result = await db.execute(sql`
       SELECT pr.id
       FROM stripe.prices pr
@@ -79,6 +98,7 @@ async function findPriceIdForTier(
       WHERE p.metadata->>'tier' = ${tier}
         AND pr.active = true
         AND p.active = true
+        AND pr.recurring->>'interval' = 'month'
       ORDER BY pr.unit_amount ASC
       LIMIT 1
     `);
@@ -95,14 +115,19 @@ router.post(
   async (req: AuthenticatedRequest, res) => {
     try {
       const user = req.dbUser!;
-      const { plan } = req.body as { plan?: string };
+      const { plan, interval } = req.body as { plan?: string; interval?: string };
 
       if (plan !== "pro" && plan !== "vendor") {
         res.status(400).json({ error: "plan must be 'pro' or 'vendor'" });
         return;
       }
 
-      const priceId = await findPriceIdForTier(plan);
+      if (interval !== undefined && interval !== "monthly" && interval !== "annual") {
+        res.status(400).json({ error: "interval must be 'monthly' or 'annual'" });
+        return;
+      }
+
+      const priceId = await findPriceIdForTier(plan, interval as "monthly" | "annual" | undefined);
       if (!priceId) {
         res.status(503).json({
           error:

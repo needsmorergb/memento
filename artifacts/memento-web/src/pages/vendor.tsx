@@ -8,7 +8,7 @@ import {
   getGetMeQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Copy, CheckCircle, Store, ExternalLink } from "lucide-react";
+import { ArrowLeft, Copy, CheckCircle, Store, ExternalLink, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { redirectToCheckout } from "@/lib/billing";
 
 export default function VendorPage() {
   const [, setLocation] = useLocation();
@@ -46,7 +47,18 @@ export default function VendorPage() {
           queryClient.invalidateQueries({ queryKey: getGetVendorReferralCodeQueryKey() });
           toast({ title: "Vendor account created!" });
         },
-        onError: () => toast({ title: "Registration failed", variant: "destructive" }),
+        onError: (err: unknown) => {
+          // 402 means we need to subscribe first — redirect to Stripe checkout
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          if (status === 402) {
+            toast({ title: "Subscription required", description: "Redirecting to checkout…" });
+            redirectToCheckout("vendor").catch(() =>
+              toast({ title: "Billing error", description: "Could not open checkout.", variant: "destructive" })
+            );
+            return;
+          }
+          toast({ title: "Registration failed", variant: "destructive" });
+        },
       }
     );
   }
@@ -126,7 +138,9 @@ export default function VendorPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="font-serif text-lg">Register your business</CardTitle>
-                <CardDescription>Enter your business name to get your referral link</CardDescription>
+                <CardDescription>
+                  Vendor plan is $99/month. Enter your business name and we&apos;ll take you to checkout.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleRegister} className="space-y-4">
@@ -141,8 +155,9 @@ export default function VendorPage() {
                       data-testid="input-business-name"
                     />
                   </div>
-                  <Button type="submit" className="w-full" disabled={registerVendor.isPending} data-testid="button-register-vendor">
-                    {registerVendor.isPending ? "Registering..." : "Register as vendor"}
+                  <Button type="submit" className="w-full gap-1.5" disabled={registerVendor.isPending} data-testid="button-register-vendor">
+                    <Star className="w-4 h-4" />
+                    {registerVendor.isPending ? "Processing..." : "Subscribe & register — $99/mo"}
                   </Button>
                 </form>
               </CardContent>
