@@ -5,6 +5,8 @@ import {
   Outfit_700Bold,
   useFonts,
 } from "@expo-google-fonts/outfit";
+import { ClerkProvider } from "@clerk/expo";
+import * as SecureStore from "expo-secure-store";
 import { setBaseUrl } from "@workspace/api-client-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
@@ -24,6 +26,18 @@ const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN;
 if (DOMAIN) {
   setBaseUrl(`https://${DOMAIN}`);
 }
+
+const CLERK_PK = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
+
+const tokenCache =
+  Platform.OS === "web"
+    ? undefined
+    : {
+        getToken: (key: string) => SecureStore.getItemAsync(key),
+        saveToken: (key: string, value: string) =>
+          SecureStore.setItemAsync(key, value),
+        clearToken: (key: string) => SecureStore.deleteItemAsync(key),
+      };
 
 SplashScreen.preventAutoHideAsync();
 
@@ -141,16 +155,18 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <EventProvider>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <KeyboardProvider>
-                <DeepLinkHandler />
-                <RootLayoutNav />
-              </KeyboardProvider>
-            </GestureHandlerRootView>
-          </EventProvider>
-        </QueryClientProvider>
+        <ClerkProvider publishableKey={CLERK_PK} tokenCache={tokenCache}>
+          <QueryClientProvider client={queryClient}>
+            <EventProvider>
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <KeyboardProvider>
+                  <DeepLinkHandler />
+                  <RootLayoutNav />
+                </KeyboardProvider>
+              </GestureHandlerRootView>
+            </EventProvider>
+          </QueryClientProvider>
+        </ClerkProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
   );

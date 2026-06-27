@@ -1,4 +1,6 @@
 import { Feather } from "@expo/vector-icons";
+import { useAuth, useClerk, useUser } from "@clerk/expo";
+import { endEvent } from "@workspace/api-client-react";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React from "react";
@@ -9,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -17,7 +20,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEvent } from "@/context/EventContext";
 import { useColors } from "@/hooks/useColors";
 import {
-  useEndEvent,
   useGetEventByToken,
   useGetEventVideoStatusByToken,
   useListEventMedia,
@@ -74,7 +76,19 @@ export default function EventScreen() {
     isHost,
     eventHostName,
     clearEvent,
+    updateStatus,
   } = useEvent();
+
+  const { isSignedIn, getToken, signOut } = useAuth();
+  const clerk = useClerk();
+  const { user } = useUser();
+
+  const [showSignInForm, setShowSignInForm] = React.useState(false);
+  const [signInEmail, setSignInEmail] = React.useState("");
+  const [signInPassword, setSignInPassword] = React.useState("");
+  const [authLoading, setAuthLoading] = React.useState(false);
+  const [authError, setAuthError] = React.useState<string | null>(null);
+  const [endingEvent, setEndingEvent] = React.useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -91,7 +105,10 @@ export default function EventScreen() {
     const list: string[] = [];
     for (const item of mediaData.media) {
       const name = item.uploaderDisplayName ?? "Guest";
-      if (!seen.has(name)) { seen.add(name); list.push(name); }
+      if (!seen.has(name)) {
+        seen.add(name);
+        list.push(name);
+      }
     }
     return list;
   }, [mediaData]);
@@ -102,54 +119,81 @@ export default function EventScreen() {
     { query: { enabled: !!shareToken, refetchInterval: 15000 } as any }
   );
 
-  const { data: videoStatus } = useGetEventVideoStatusByToken(
-    shareToken ?? "",
-    {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      query: { enabled: !!shareToken && eventStatus === "ended", refetchInterval: 20000 } as any,
-    }
-  );
+  const { data: videoStatus } = useGetEventVideoStatusByToken(shareToken ?? "", {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: { enabled: !!shareToken && eventStatus === "ended", refetchInterval: 20000 } as any,
+  });
 
-  const endEventMutation = useEndEvent();
+  const handleClerkSignIn = async () => {
+    if (!clerk.client) {
+      setAuthError("Authentication service not ready. Please try again.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const clientAny = clerk.client as any;
+      const result = await clientAny.signIn.create({
+        identifier: signInEmail.trim(),
+        password: signInPassword,
+      });
+      if (result?.status === "complete") {
+        await clerk.setActive({ session: result.createdSessionId });
+      }
+      setShowSignInForm(false);
+      setSignInEmail("");
+      setSignInPassword("");
+    } catch (e: unknown) {
+      setAuthError(
+        e instanceof Error
+          ? e.message
+          : "Sign-in failed. Check your email and password."
+      );
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   const handleEndEvent = () => {
+    if (!eventId) return;
+
+    if (!isSignedIn) {
+      setShowSignInForm(true);
+      return;
+    }
+
     Alert.alert(
       "End Event",
-      "This will end the event and start generating the highlight video. Continue?",
+      "This will close the event and start generating the highlight video. Continue?",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "End & Generate",
           style: "destructive",
-          onPress: () => {
+          onPress: async () => {
             if (!eventId) return;
-            endEventMutation.mutate(
-              { eventId },
-              {
-                onSuccess: () => {
-                  Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Success
-                  );
-                  Alert.alert(
-                    "Event ended!",
-                    "Your highlight video is being compiled. We'll notify you when it's ready."
-                  );
-                },
-                onError: (err) => {
-                  const msg =
-                    err instanceof Error ? err.message : "Could not end event";
-                  if (msg.includes("401") || msg.includes("403")) {
-                    Alert.alert(
-                      "Sign in required",
-                      "Host controls require you to sign in with your account. Please use the web app to end the event.",
-                      [{ text: "OK" }]
-                    );
-                  } else {
-                    Alert.alert("Error", msg);
-                  }
-                },
-              }
-            );
+            setEndingEvent(true);
+            try {
+              const token = await getToken();
+              await endEvent(eventId, {
+                headers: { Authorization: `Bearer ${token ?? ""}` },
+              });
+              updateStatus("ended");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success
+              );
+              Alert.alert(
+                "Event ended!",
+                "Your highlight video is being compiled. We'll notify you when it's ready."
+              );
+            } catch (e) {
+              const msg =
+                e instanceof Error ? e.message : "Could not end event";
+              Alert.alert("Error", msg);
+            } finally {
+              setEndingEvent(false);
+            }
           },
         },
       ]
@@ -181,6 +225,8 @@ export default function EventScreen() {
       })
     : null;
 
+  const hostEmail = user?.emailAddresses?.[0]?.emailAddress;
+
   return (
     <View
       style={[
@@ -194,6 +240,7 @@ export default function EventScreen() {
           { paddingBottom: botPad + 100 },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.headerSection}>
           <Text
@@ -325,6 +372,186 @@ export default function EventScreen() {
           </View>
         )}
 
+        {isHost && (
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: isSignedIn ? "#bbf7d0" : colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <View
+                style={[
+                  styles.infoIconWrap,
+                  {
+                    backgroundColor: isSignedIn
+                      ? "#dcfce7"
+                      : colors.primary + "15",
+                  },
+                ]}
+              >
+                <Feather
+                  name={isSignedIn ? "check-circle" : "lock"}
+                  size={16}
+                  color={isSignedIn ? "#16a34a" : colors.primary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.infoLabel,
+                    {
+                      color: colors.mutedForeground,
+                      fontFamily: "Outfit_400Regular",
+                    },
+                  ]}
+                >
+                  Host Account
+                </Text>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    {
+                      color: isSignedIn ? "#15803d" : colors.foreground,
+                      fontFamily: "Outfit_500Medium",
+                    },
+                  ]}
+                >
+                  {isSignedIn
+                    ? hostEmail ?? "Signed in"
+                    : "Sign in to manage this event"}
+                </Text>
+              </View>
+              {isSignedIn && (
+                <TouchableOpacity
+                  onPress={() => signOut()}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text
+                    style={[
+                      styles.linkText,
+                      { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+                    ]}
+                  >
+                    Sign out
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {!isSignedIn && (
+              <>
+                <TouchableOpacity
+                  style={[styles.signInToggle]}
+                  onPress={() => setShowSignInForm((v) => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.signInToggleText,
+                      { color: colors.primary, fontFamily: "Outfit_500Medium" },
+                    ]}
+                  >
+                    {showSignInForm ? "Hide sign-in form" : "Sign in as host →"}
+                  </Text>
+                </TouchableOpacity>
+
+                {showSignInForm && (
+                  <View style={[styles.signInForm, { borderTopColor: colors.border }]}>
+                    {authError && (
+                      <View
+                        style={[
+                          styles.authErrorBox,
+                          { backgroundColor: colors.destructive + "15" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.authErrorText,
+                            {
+                              color: colors.destructive,
+                              fontFamily: "Outfit_400Regular",
+                            },
+                          ]}
+                        >
+                          {authError}
+                        </Text>
+                      </View>
+                    )}
+                    <TextInput
+                      style={[
+                        styles.input,
+                        {
+                          borderColor: colors.border,
+                          color: colors.foreground,
+                          backgroundColor: colors.background,
+                          borderRadius: colors.radius,
+                          fontFamily: "Outfit_400Regular",
+                        },
+                      ]}
+                      placeholder="Email"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={signInEmail}
+                      onChangeText={setSignInEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoComplete="email"
+                    />
+                    <TextInput
+                      style={[
+                        styles.input,
+                        {
+                          borderColor: colors.border,
+                          color: colors.foreground,
+                          backgroundColor: colors.background,
+                          borderRadius: colors.radius,
+                          fontFamily: "Outfit_400Regular",
+                        },
+                      ]}
+                      placeholder="Password"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={signInPassword}
+                      onChangeText={setSignInPassword}
+                      secureTextEntry
+                      autoComplete="password"
+                    />
+                    <TouchableOpacity
+                      style={[
+                        styles.signInBtn,
+                        {
+                          backgroundColor: colors.primary,
+                          borderRadius: colors.radius,
+                          opacity: authLoading ? 0.6 : 1,
+                        },
+                      ]}
+                      onPress={handleClerkSignIn}
+                      disabled={authLoading}
+                      activeOpacity={0.8}
+                    >
+                      {authLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text
+                          style={[
+                            styles.signInBtnText,
+                            { fontFamily: "Outfit_600SemiBold" },
+                          ]}
+                        >
+                          Sign In
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        )}
+
         {videoStatus && (
           <View
             style={[
@@ -376,10 +603,7 @@ export default function EventScreen() {
             </View>
             {videoStatus.status === "completed" && videoStatus.videoUrl && (
               <TouchableOpacity
-                style={[
-                  styles.watchBtn,
-                  { backgroundColor: "#16a34a" },
-                ]}
+                style={[styles.watchBtn, { backgroundColor: "#16a34a" }]}
                 onPress={() => {
                   if (videoStatus.videoUrl) {
                     router.push({
@@ -387,6 +611,7 @@ export default function EventScreen() {
                       params: {
                         url: videoStatus.videoUrl,
                         title: eventTitle ?? "Highlight Video",
+                        date: event?.eventDate ?? "",
                       },
                     });
                   }
@@ -408,10 +633,7 @@ export default function EventScreen() {
               <Text
                 style={[
                   styles.videoSub,
-                  {
-                    color: colors.destructive,
-                    fontFamily: "Outfit_400Regular",
-                  },
+                  { color: colors.destructive, fontFamily: "Outfit_400Regular" },
                 ]}
               >
                 {videoStatus.errorMessage}
@@ -432,10 +654,7 @@ export default function EventScreen() {
             ]}
           >
             <View
-              style={[
-                styles.infoRow,
-                { borderBottomColor: colors.border },
-              ]}
+              style={[styles.infoRow, { borderBottomColor: colors.border }]}
             >
               <View
                 style={[styles.infoIconWrap, { backgroundColor: colors.muted }]}
@@ -445,10 +664,7 @@ export default function EventScreen() {
               <Text
                 style={[
                   styles.infoValue,
-                  {
-                    color: colors.foreground,
-                    fontFamily: "Outfit_600SemiBold",
-                  },
+                  { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
                 ]}
               >
                 Contributors ({guestRoster.length})
@@ -481,10 +697,7 @@ export default function EventScreen() {
                 <Text
                   style={[
                     styles.infoValue,
-                    {
-                      color: colors.foreground,
-                      fontFamily: "Outfit_400Regular",
-                    },
+                    { color: colors.foreground, fontFamily: "Outfit_400Regular" },
                   ]}
                 >
                   {name}
@@ -504,43 +717,56 @@ export default function EventScreen() {
             >
               Host Controls
             </Text>
+            {!isSignedIn && (
+              <Text
+                style={[
+                  styles.hostNote,
+                  { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+                ]}
+              >
+                Sign in above to unlock host controls.
+              </Text>
+            )}
             <TouchableOpacity
               style={[
                 styles.endBtn,
                 {
-                  backgroundColor: colors.destructive,
+                  backgroundColor: isSignedIn
+                    ? colors.destructive
+                    : colors.muted,
                   borderRadius: colors.radius,
-                  opacity: endEventMutation.isPending ? 0.6 : 1,
+                  opacity: endingEvent ? 0.6 : 1,
                 },
               ]}
               onPress={handleEndEvent}
-              disabled={endEventMutation.isPending}
+              disabled={endingEvent}
               activeOpacity={0.8}
             >
-              {endEventMutation.isPending ? (
-                <ActivityIndicator color="#fff" />
+              {endingEvent ? (
+                <ActivityIndicator color={isSignedIn ? "#fff" : colors.mutedForeground} />
               ) : (
                 <>
-                  <Feather name="stop-circle" size={18} color="#fff" />
+                  <Feather
+                    name={isSignedIn ? "stop-circle" : "lock"}
+                    size={18}
+                    color={isSignedIn ? "#fff" : colors.mutedForeground}
+                  />
                   <Text
                     style={[
                       styles.endBtnText,
-                      { fontFamily: "Outfit_600SemiBold" },
+                      {
+                        color: isSignedIn ? "#fff" : colors.mutedForeground,
+                        fontFamily: "Outfit_600SemiBold",
+                      },
                     ]}
                   >
-                    End Event & Generate Video
+                    {isSignedIn
+                      ? "End Event & Generate Video"
+                      : "Sign In to End Event"}
                   </Text>
                 </>
               )}
             </TouchableOpacity>
-            <Text
-              style={[
-                styles.hostNote,
-                { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
-              ]}
-            >
-              Host sign-in is required for this action.
-            </Text>
           </View>
         )}
 
@@ -600,10 +826,7 @@ const styles = StyleSheet.create({
   pillDot: { width: 8, height: 8, borderRadius: 4 },
   pillText: { fontSize: 13 },
 
-  card: {
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-  },
+  card: { borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -622,6 +845,29 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontSize: 12 },
   infoValue: { fontSize: 15, marginTop: 2 },
+  linkText: { fontSize: 13 },
+
+  signInToggle: { paddingHorizontal: 16, paddingVertical: 12 },
+  signInToggleText: { fontSize: 14 },
+  signInForm: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    padding: 16,
+    gap: 10,
+  },
+  authErrorBox: { borderRadius: 8, padding: 10 },
+  authErrorText: { fontSize: 13, lineHeight: 18 },
+  input: {
+    height: 46,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    fontSize: 15,
+  },
+  signInBtn: {
+    height: 46,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  signInBtnText: { color: "#fff", fontSize: 15 },
 
   videoCard: { borderWidth: 1, padding: 16, gap: 12 },
   videoCardHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
@@ -647,8 +893,8 @@ const styles = StyleSheet.create({
     height: 54,
     paddingHorizontal: 20,
   },
-  endBtnText: { color: "#fff", fontSize: 16 },
-  hostNote: { fontSize: 12, textAlign: "center" },
+  endBtnText: { fontSize: 16 },
+  hostNote: { fontSize: 12 },
 
   leaveSection: { marginTop: 4 },
   leaveBtn: {
