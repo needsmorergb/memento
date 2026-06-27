@@ -5,6 +5,7 @@ import {
   eventGuestsTable,
   vendorCodesTable,
   usersTable,
+  subscriptionsTable,
 } from "@workspace/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
@@ -71,8 +72,22 @@ router.post("/guests/join", async (req, res) => {
         ),
       });
       if (code) {
-        vendorCodeId = code.id;
-        vendorBenefit = true;
+        // Verify the code owner still has an active vendor subscription
+        const vendorSub = await db.query.subscriptionsTable.findFirst({
+          where: and(
+            eq(subscriptionsTable.userId, code.userId),
+            isNull(subscriptionsTable.deletedAt),
+          ),
+        });
+        const activeStatuses = ["active", "trialing"];
+        if (
+          vendorSub?.tier === "vendor" &&
+          vendorSub.status != null &&
+          activeStatuses.includes(vendorSub.status)
+        ) {
+          vendorCodeId = code.id;
+          vendorBenefit = true;
+        }
       }
     }
 

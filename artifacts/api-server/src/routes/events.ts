@@ -321,11 +321,30 @@ router.post("/events/:eventId/end", requireAuth, async (req: AuthenticatedReques
     });
     // Treat lapsed/past-due/cancelled subscriptions as free to avoid giving paid caps for free
     const activeStatuses = ["active", "trialing"];
-    const effectiveTier =
+    const hostEffectiveTier =
       subscription?.status && activeStatuses.includes(subscription.status)
         ? (subscription.tier ?? "free")
         : "free";
-    const tier = effectiveTier;
+
+    // If host is on free tier, check if any guests joined via an active vendor referral code.
+    // A vendor-referred guest earns the event a 3-minute (vendor) cap — the host's free cap is upgraded.
+    let tier = hostEffectiveTier;
+    if (tier === "free") {
+      const [vendorGuestRow] = await db
+        .select({ cnt: count() })
+        .from(eventGuestsTable)
+        .where(
+          and(
+            eq(eventGuestsTable.eventId, event.id),
+            eq(eventGuestsTable.vendorBenefit, true),
+            isNull(eventGuestsTable.deletedAt),
+          ),
+        );
+      if (Number(vendorGuestRow?.cnt ?? 0) > 0) {
+        tier = "vendor"; // 3-minute cap from vendor benefit
+      }
+    }
+
     const durationCap = getDurationCap(tier);
     const { quality, maxResolutionPx } = getQualityCap(tier);
 

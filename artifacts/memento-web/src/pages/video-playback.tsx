@@ -1,9 +1,12 @@
 import { useParams, useLocation } from "wouter";
+import { useUser } from "@clerk/react";
 import {
   useGetEventByToken,
   useGetEventVideoStatusByToken,
+  useGetMySubscription,
   getGetEventVideoStatusByTokenQueryKey,
   getGetEventByTokenQueryKey,
+  getGetMySubscriptionQueryKey,
 } from "@workspace/api-client-react";
 import {
   Film, Loader2, AlertCircle, Clock, ArrowLeft, Download, Smartphone, Star,
@@ -91,6 +94,19 @@ export default function VideoPlayback() {
   const params = useParams<{ shareToken: string }>();
   const shareToken = params.shareToken;
   const [, setLocation] = useLocation();
+
+  // Check if the current viewer has a Pro/Vendor subscription (gates download button)
+  const { isSignedIn } = useUser();
+  const { data: viewerSub } = useGetMySubscription({
+    query: {
+      queryKey: getGetMySubscriptionQueryKey(),
+      enabled: !!isSignedIn,
+      retry: false,
+    },
+  });
+  const viewerCanDownload =
+    !!isSignedIn &&
+    (viewerSub?.tier === "pro" || viewerSub?.tier === "vendor");
 
   // Public endpoint — works for any recipient on any device, no auth required.
   // Uses shareToken directly so email links always resolve correctly.
@@ -194,7 +210,7 @@ export default function VideoPlayback() {
                   {videoStatus.tier ?? "free"} tier · {capLabel} cap
                 </p>
               </div>
-              {videoStatus.tier && videoStatus.tier !== "free" ? (
+              {viewerCanDownload ? (
                 <a href={videoStatus.videoUrl} download>
                   <Button variant="outline" className="gap-1.5" data-testid="button-download-video">
                     <Download className="w-4 h-4" />

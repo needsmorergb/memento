@@ -331,6 +331,15 @@ export async function cancelSubscription(
       updatedAt: new Date(),
     })
     .where(eq(subscriptionsTable.id, existing.id));
+
+  // Deactivate vendor codes when vendor subscription is cancelled so lapsed vendors
+  // cannot continue granting paid benefits to new guests
+  if (existing.tier === "vendor") {
+    await db
+      .update(vendorCodesTable)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(vendorCodesTable.userId, existing.userId));
+  }
 }
 
 export default router;
