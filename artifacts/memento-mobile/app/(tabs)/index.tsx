@@ -17,10 +17,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useColors } from "@/hooks/useColors";
 import {
   useGetMySubscription,
   getGetMySubscriptionQueryKey,
+  useUpdateSubscriptionInterval,
 } from "@workspace/api-client-react";
 
 const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN;
@@ -72,6 +74,10 @@ export default function SubscriptionScreen() {
   const [authError, setAuthError] = React.useState<string | null>(null);
   const [upgradeLoading, setUpgradeLoading] = React.useState(false);
   const [portalLoading, setPortalLoading] = React.useState(false);
+  const [annualUpgradeLoading, setAnnualUpgradeLoading] = React.useState(false);
+
+  const queryClient = useQueryClient();
+  const { mutateAsync: upgradeToAnnual } = useUpdateSubscriptionInterval();
 
   const [showPlanPicker, setShowPlanPicker] = React.useState(false);
   const [prices, setPrices] = React.useState<PriceRow[]>([]);
@@ -185,6 +191,34 @@ export default function SubscriptionScreen() {
     } finally {
       setUpgradeLoading(false);
     }
+  };
+
+  const handleUpgradeToAnnual = async () => {
+    Alert.alert(
+      "Switch to Annual Billing",
+      "You'll be switched to annual billing immediately. The difference will be prorated. This saves you money compared to monthly.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm",
+          style: "default",
+          onPress: async () => {
+            setAnnualUpgradeLoading(true);
+            try {
+              await upgradeToAnnual({ data: { interval: "annual" } });
+              await queryClient.invalidateQueries({
+                queryKey: getGetMySubscriptionQueryKey(),
+              });
+              Alert.alert("Done!", "You're now on annual billing. Enjoy the savings!");
+            } catch (e) {
+              Alert.alert("Error", e instanceof Error ? e.message : "Could not switch to annual billing");
+            } finally {
+              setAnnualUpgradeLoading(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleManagePortal = async () => {
@@ -538,6 +572,44 @@ export default function SubscriptionScreen() {
                           ]}
                         >
                           Upgrade to Pro
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                {isPaid && subTier === "pro" && mySub?.billingInterval !== "annual" && (
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtn,
+                      {
+                        backgroundColor: "#16a34a" + "15",
+                        borderRadius: colors.radius,
+                        borderWidth: 1,
+                        borderColor: "#16a34a" + "60",
+                        opacity: annualUpgradeLoading ? 0.6 : 1,
+                        marginBottom: 0,
+                      },
+                    ]}
+                    onPress={handleUpgradeToAnnual}
+                    disabled={annualUpgradeLoading}
+                    activeOpacity={0.8}
+                  >
+                    {annualUpgradeLoading ? (
+                      <ActivityIndicator color="#16a34a" />
+                    ) : (
+                      <>
+                        <Feather name="trending-up" size={16} color="#16a34a" />
+                        <Text
+                          style={[
+                            styles.actionBtnText,
+                            {
+                              fontFamily: "Outfit_600SemiBold",
+                              color: "#16a34a",
+                            },
+                          ]}
+                        >
+                          Upgrade to Annual
                         </Text>
                       </>
                     )}

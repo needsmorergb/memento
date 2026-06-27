@@ -232,8 +232,9 @@ export async function activateSubscription(opts: {
   stripeSubscriptionId: string;
   stripeCustomerId: string;
   currentPeriodEnd?: Date;
+  billingInterval?: "monthly" | "annual";
 }): Promise<void> {
-  const { userId, tier, stripeSubscriptionId, stripeCustomerId, currentPeriodEnd } = opts;
+  const { userId, tier, stripeSubscriptionId, stripeCustomerId, currentPeriodEnd, billingInterval } = opts;
 
   await db.transaction(async (tx) => {
     // Acquire a transaction-scoped advisory lock keyed on a hash of the userId.
@@ -258,6 +259,7 @@ export async function activateSubscription(opts: {
           stripeSubscriptionId,
           stripeCustomerId,
           currentPeriodEnd: currentPeriodEnd ?? null,
+          ...(billingInterval ? { billingInterval } : {}),
           updatedAt: new Date(),
         })
         .where(eq(subscriptionsTable.id, existing.id));
@@ -269,6 +271,7 @@ export async function activateSubscription(opts: {
         stripeSubscriptionId,
         stripeCustomerId,
         currentPeriodEnd: currentPeriodEnd ?? null,
+        ...(billingInterval ? { billingInterval } : {}),
       });
     }
   });
@@ -303,7 +306,7 @@ export async function activateSubscription(opts: {
 // Internal helper — update subscription status by Stripe customer ID
 export async function updateSubscriptionByCustomer(
   stripeCustomerId: string,
-  updates: { status?: string; tier?: "free" | "pro" | "vendor"; currentPeriodEnd?: Date },
+  updates: { status?: string; tier?: "free" | "pro" | "vendor"; currentPeriodEnd?: Date; billingInterval?: "monthly" | "annual" },
 ): Promise<void> {
   const existing = await db.query.subscriptionsTable.findFirst({
     where: and(
@@ -319,6 +322,87 @@ export async function updateSubscriptionByCustomer(
     .set({ ...updates, updatedAt: new Date() })
     .where(eq(subscriptionsTable.id, existing.id));
 }
+
+// PATCH /billing/subscription — switch billing interval (e.g. monthly → annual)
+router.patch(
+  "/billing/subscription",
+  requireAuth,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const user = req.dbUser!;
+      const { interval } = req.body as { interval?: string };
+
+      if (interval !== "annual") {
+        res.status(400).json({ error: "interval must be 'annual'" });
+        return;
+      }
+
+      const subscription = await db.query.subscriptionsTable.findFirst({
+        where: and(
+          eq(subscriptionsTable.userId, user.id),
+          isNull(subscriptionsTable.deletedAt),
+        ),
+      });
+
+      if (!subscription?.stripeSubscriptionId) {
+        res.status(404).json({ error: "No active subscription found." });
+        return;
+      }
+
+      if (subscription.tier !== "pro") {
+        res.status(400).json({ error: "Interval upgrade is only available for Pro subscriptions." });
+        return;
+      }
+
+      if (subscription.billingInterval === "annual") {
+        res.status(400).json({ error: "Subscription is already on annual billing." });
+        return;
+      }
+
+      const annualPriceId = await findPriceIdForTier("pro", "annual");
+      if (!annualPriceId) {
+        res.status(503).json({ error: "Annual pricing not available. Contact support." });
+        return;
+      }
+
+      const stripe = await getUncachableStripeClient();
+
+      const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+      const itemId = stripeSubscription.items.data[0]?.id;
+      if (!itemId) {
+        res.status(500).json({ error: "Could not find subscription item." });
+        return;
+      }
+
+      const updated = await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+        items: [{ id: itemId, price: annualPriceId }],
+        proration_behavior: "create_prorations",
+      });
+
+      const periodEndRaw = (updated as unknown as Record<string, unknown>)["current_period_end"] as number | undefined;
+      const newPeriodEnd = periodEndRaw
+        ? new Date(periodEndRaw * 1000)
+        : undefined;
+
+      await db
+        .update(subscriptionsTable)
+        .set({
+          billingInterval: "annual",
+          currentPeriodEnd: newPeriodEnd ?? null,
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptionsTable.id, subscription.id));
+
+      res.json({
+        billingInterval: "annual",
+        currentPeriodEnd: newPeriodEnd ?? null,
+      });
+    } catch (err) {
+      logger.error({ err }, "Failed to update subscription interval");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
 
 // Internal helper — downgrade subscription by Stripe subscription ID
 export async function cancelSubscription(

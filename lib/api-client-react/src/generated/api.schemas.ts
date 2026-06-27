@@ -224,12 +224,53 @@ export const SubscriptionInfoTier = {
   vendor: 'vendor',
 } as const;
 
+/**
+ * Billing interval for paid plans. Null for free tier.
+ */
+export type SubscriptionInfoBillingInterval = typeof SubscriptionInfoBillingInterval[keyof typeof SubscriptionInfoBillingInterval] | null;
+
+
+export const SubscriptionInfoBillingInterval = {
+  monthly: 'monthly',
+  annual: 'annual',
+} as const;
+
 export interface SubscriptionInfo {
   tier: SubscriptionInfoTier;
   status: string;
   stripeSubscriptionId?: string | null;
   currentPeriodEnd?: string | null;
+  /** Billing interval for paid plans. Null for free tier. */
+  billingInterval?: SubscriptionInfoBillingInterval;
   videoDurationCapSeconds?: number;
+}
+
+/**
+ * The new billing interval. Currently only upgrading to annual is supported.
+ */
+export type UpdateSubscriptionRequestInterval = typeof UpdateSubscriptionRequestInterval[keyof typeof UpdateSubscriptionRequestInterval];
+
+
+export const UpdateSubscriptionRequestInterval = {
+  annual: 'annual',
+} as const;
+
+export interface UpdateSubscriptionRequest {
+  /** The new billing interval. Currently only upgrading to annual is supported. */
+  interval: UpdateSubscriptionRequestInterval;
+}
+
+export type UpdateSubscriptionResponseBillingInterval = typeof UpdateSubscriptionResponseBillingInterval[keyof typeof UpdateSubscriptionResponseBillingInterval];
+
+
+export const UpdateSubscriptionResponseBillingInterval = {
+  monthly: 'monthly',
+  annual: 'annual',
+} as const;
+
+export interface UpdateSubscriptionResponse {
+  billingInterval: UpdateSubscriptionResponseBillingInterval;
+  currentPeriodEnd?: string | null;
 }
 
 export interface RegisterVendorRequest {
@@ -248,6 +289,35 @@ export interface VendorCodeInfo {
   joinUrl: string;
   benefitDescription?: string | null;
   videoDurationCapSeconds?: number;
+}
+
+export type CreateCheckoutRequestPlan = typeof CreateCheckoutRequestPlan[keyof typeof CreateCheckoutRequestPlan];
+
+
+export const CreateCheckoutRequestPlan = {
+  pro: 'pro',
+  vendor: 'vendor',
+} as const;
+
+/**
+ * Billing interval. Defaults to monthly. Annual only available for Pro.
+ */
+export type CreateCheckoutRequestInterval = typeof CreateCheckoutRequestInterval[keyof typeof CreateCheckoutRequestInterval];
+
+
+export const CreateCheckoutRequestInterval = {
+  monthly: 'monthly',
+  annual: 'annual',
+} as const;
+
+export interface CreateCheckoutRequest {
+  plan: CreateCheckoutRequestPlan;
+  /** Billing interval. Defaults to monthly. Annual only available for Pro. */
+  interval?: CreateCheckoutRequestInterval;
+}
+
+export interface CheckoutResponse {
+  url: string;
 }
 
 export interface UploadUrlRequest {
@@ -309,5 +379,11 @@ export type ListEventGuests200 = {
 
 export type ListEventMedia200 = {
   media: MediaItem[];
+};
+
+export type ListBillingPrices200PricesItem = { [key: string]: unknown };
+
+export type ListBillingPrices200 = {
+  prices: ListBillingPrices200PricesItem[];
 };
 

@@ -5,6 +5,7 @@
  * Memento — Event media sharing and same-day edit API
  * OpenAPI spec version: 0.1.0
  */
+import type { SubscriptionInfoBillingInterval } from './subscriptionInfoBillingInterval';
 import type { SubscriptionInfoTier } from './subscriptionInfoTier';
 
 export interface SubscriptionInfo {
@@ -12,5 +13,7 @@ export interface SubscriptionInfo {
   status: string;
   stripeSubscriptionId?: string | null;
   currentPeriodEnd?: Date | null;
+  /** Billing interval for paid plans. Null for free tier. */
+  billingInterval?: SubscriptionInfoBillingInterval;
   videoDurationCapSeconds?: number;
 }

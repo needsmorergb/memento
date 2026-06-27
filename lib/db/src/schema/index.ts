@@ -74,6 +74,7 @@ export const subscriptionsTable = pgTable("subscriptions", {
   stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
   stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
   status: varchar("status", { length: 50 }).default("active").notNull(),
+  billingInterval: varchar("billing_interval", { length: 20 }),
   currentPeriodEnd: timestamp("current_period_end"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

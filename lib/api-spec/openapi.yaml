@@ -295,6 +295,27 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /events/token/{shareToken}/video-status:
+    get:
+      operationId: getEventVideoStatusByToken
+      tags: [video]
+      summary: Get video job status for an event by share token (public)
+      parameters:
+        - name: shareToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Video job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJobStatus"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   # ── Guests ─────────────────────────────────────────────────────────────────
 
   /guests/join:
@@ -536,6 +557,39 @@ paths:
                     type: array
                     items:
                       type: object
+
+  /billing/subscription:
+    patch:
+      operationId: updateSubscriptionInterval
+      tags: [subscriptions]
+      summary: Switch billing interval without cancelling (e.g. monthly → annual)
+      security:
+        - clerkAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSubscriptionRequest"
+      responses:
+        "200":
+          description: Updated subscription details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateSubscriptionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Annual pricing not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 
   # ── Storage ────────────────────────────────────────────────────────────────
 
@@ -957,8 +1011,34 @@ components:
           type: string
           format: date-time
           nullable: true
+        billingInterval:
+          type: string
+          enum: [monthly, annual]
+          nullable: true
+          description: Billing interval for paid plans. Null for free tier.
         videoDurationCapSeconds:
           type: integer
+
+    UpdateSubscriptionRequest:
+      type: object
+      required: [interval]
+      properties:
+        interval:
+          type: string
+          enum: [annual]
+          description: The new billing interval. Currently only upgrading to annual is supported.
+
+    UpdateSubscriptionResponse:
+      type: object
+      required: [billingInterval]
+      properties:
+        billingInterval:
+          type: string
+          enum: [monthly, annual]
+        currentPeriodEnd:
+          type: string
+          format: date-time
+          nullable: true
 
     RegisterVendorRequest:
       type: object

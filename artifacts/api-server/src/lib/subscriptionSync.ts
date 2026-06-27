@@ -30,13 +30,25 @@ export async function syncSubscriptionFromStripeEvent(
 
       if (!userId || !tier || !stripeSubId || !stripeCustomerId) break;
 
+      // Retrieve the Stripe subscription to determine the billing interval
+      let billingInterval: "monthly" | "annual" | undefined;
+      try {
+        const sub = await _stripe.subscriptions.retrieve(stripeSubId);
+        const interval = sub.items.data[0]?.price?.recurring?.interval;
+        if (interval === "year") billingInterval = "annual";
+        else if (interval === "month") billingInterval = "monthly";
+      } catch {
+        // non-fatal — interval stays undefined
+      }
+
       await activateSubscription({
         userId,
         tier,
         stripeSubscriptionId: stripeSubId,
         stripeCustomerId,
+        billingInterval,
       });
-      logger.info({ userId, tier }, "Subscription activated from checkout");
+      logger.info({ userId, tier, billingInterval }, "Subscription activated from checkout");
       break;
     }
 

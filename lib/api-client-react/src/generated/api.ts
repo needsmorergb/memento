@@ -21,8 +21,11 @@ import type {
 
 import type {
   BadRequestResponse,
+  CheckoutResponse,
   ConfirmMediaUploadRequest,
+  CreateCheckoutRequest,
   CreateEventRequest,
+  ErrorEnvelope,
   EventDetail,
   EventQrPayload,
   ForbiddenResponse,
@@ -31,6 +34,7 @@ import type {
   InternalErrorResponse,
   JoinEventRequest,
   JoinEventResponse,
+  ListBillingPrices200,
   ListEventGuests200,
   ListEventMedia200,
   ListMyEvents200,
@@ -42,6 +46,8 @@ import type {
   UnauthorizedResponse,
   UpdateEventRequest,
   UpdateGuestRequest,
+  UpdateSubscriptionRequest,
+  UpdateSubscriptionResponse,
   UpdateUserRequest,
   UploadUrlRequest,
   UploadUrlResponse,
@@ -885,62 +891,6 @@ export function useGetEventVideoStatus<TData = Awaited<ReturnType<typeof getEven
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-// ── Public video status by share token (no auth required) ──────────────────
-export const getGetEventVideoStatusByTokenUrl = (shareToken: string) =>
-  `/api/events/token/${shareToken}/video-status`;
-
-export const getEventVideoStatusByToken = async (
-  shareToken: string,
-  options?: RequestInit,
-): Promise<VideoJobStatus> =>
-  customFetch<VideoJobStatus>(getGetEventVideoStatusByTokenUrl(shareToken), {
-    ...options,
-    method: 'GET',
-  });
-
-export const getGetEventVideoStatusByTokenQueryKey = (shareToken: string) =>
-  [`/api/events/token/${shareToken}/video-status`] as const;
-
-export const getGetEventVideoStatusByTokenQueryOptions = <
-  TData = Awaited<ReturnType<typeof getEventVideoStatusByToken>>,
-  TError = ErrorType<NotFoundResponse>,
->(
-  shareToken: string,
-  options?: {
-    query?: UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-  const queryKey = queryOptions?.queryKey ?? getGetEventVideoStatusByTokenQueryKey(shareToken);
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getEventVideoStatusByToken>>> = ({
-    signal,
-  }) => getEventVideoStatusByToken(shareToken, { signal, ...requestOptions });
-  return {
-    queryKey,
-    queryFn,
-    enabled: !!shareToken,
-    ...queryOptions,
-  } as UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData> & {
-    queryKey: QueryKey;
-  };
-};
-
-export function useGetEventVideoStatusByToken<
-  TData = Awaited<ReturnType<typeof getEventVideoStatusByToken>>,
-  TError = ErrorType<NotFoundResponse>,
->(
-  shareToken: string,
-  options?: {
-    query?: UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetEventVideoStatusByTokenQueryOptions(shareToken, options);
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
 
 
 
@@ -1090,6 +1040,83 @@ export function useGetEventByToken<TData = Awaited<ReturnType<typeof getEventByT
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetEventByTokenQueryOptions(shareToken,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetEventVideoStatusByTokenUrl = (shareToken: string,) => {
+
+
+
+
+  return `/api/events/token/${shareToken}/video-status`
+}
+
+/**
+ * @summary Get video job status for an event by share token (public)
+ */
+export const getEventVideoStatusByToken = async (shareToken: string, options?: RequestInit): Promise<VideoJobStatus> => {
+
+  return customFetch<VideoJobStatus>(getGetEventVideoStatusByTokenUrl(shareToken),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEventVideoStatusByTokenQueryKey = (shareToken: string,) => {
+    return [
+    `/api/events/token/${shareToken}/video-status`
+    ] as const;
+    }
+
+
+export const getGetEventVideoStatusByTokenQueryOptions = <TData = Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError = ErrorType<NotFoundResponse>>(shareToken: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEventVideoStatusByTokenQueryKey(shareToken);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEventVideoStatusByToken>>> = ({ signal }) => getEventVideoStatusByToken(shareToken, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: shareToken !== null && shareToken !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEventVideoStatusByTokenQueryResult = NonNullable<Awaited<ReturnType<typeof getEventVideoStatusByToken>>>
+export type GetEventVideoStatusByTokenQueryError = ErrorType<NotFoundResponse>
+
+
+/**
+ * @summary Get video job status for an event by share token (public)
+ */
+
+export function useGetEventVideoStatusByToken<TData = Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError = ErrorType<NotFoundResponse>>(
+ shareToken: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEventVideoStatusByTokenQueryOptions(shareToken,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -1613,6 +1640,293 @@ export function useGetVendorReferralCode<TData = Awaited<ReturnType<typeof getVe
 
 
 
+
+export const getCreateCheckoutSessionUrl = () => {
+
+
+
+
+  return `/api/billing/checkout`
+}
+
+/**
+ * @summary Create a Stripe Checkout session for the given plan
+ */
+export const createCheckoutSession = async (createCheckoutRequest: CreateCheckoutRequest, options?: RequestInit): Promise<CheckoutResponse> => {
+
+  return customFetch<CheckoutResponse>(getCreateCheckoutSessionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createCheckoutRequest)
+  }
+);}
+
+
+
+
+export const getCreateCheckoutSessionMutationOptions = <TError = ErrorType<BadRequestResponse | UnauthorizedResponse | ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSession>>, TError,{data: BodyType<CreateCheckoutRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSession>>, TError,{data: BodyType<CreateCheckoutRequest>}, TContext> => {
+
+const mutationKey = ['createCheckoutSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCheckoutSession>>, {data: BodyType<CreateCheckoutRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCheckoutSession(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCheckoutSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createCheckoutSession>>>
+    export type CreateCheckoutSessionMutationBody = BodyType<CreateCheckoutRequest>
+    export type CreateCheckoutSessionMutationError = ErrorType<BadRequestResponse | UnauthorizedResponse | ErrorEnvelope>
+
+    /**
+ * @summary Create a Stripe Checkout session for the given plan
+ */
+export const useCreateCheckoutSession = <TError = ErrorType<BadRequestResponse | UnauthorizedResponse | ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutSession>>, TError,{data: BodyType<CreateCheckoutRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCheckoutSession>>,
+        TError,
+        {data: BodyType<CreateCheckoutRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateCheckoutSessionMutationOptions(options));
+    }
+
+export const getCreatePortalSessionUrl = () => {
+
+
+
+
+  return `/api/billing/portal`
+}
+
+/**
+ * @summary Create a Stripe Customer Portal session
+ */
+export const createPortalSession = async ( options?: RequestInit): Promise<CheckoutResponse> => {
+
+  return customFetch<CheckoutResponse>(getCreatePortalSessionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getCreatePortalSessionMutationOptions = <TError = ErrorType<UnauthorizedResponse | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPortalSession>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPortalSession>>, TError,void, TContext> => {
+
+const mutationKey = ['createPortalSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPortalSession>>, void> = () => {
+
+
+          return  createPortalSession(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePortalSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createPortalSession>>>
+
+    export type CreatePortalSessionMutationError = ErrorType<UnauthorizedResponse | NotFoundResponse>
+
+    /**
+ * @summary Create a Stripe Customer Portal session
+ */
+export const useCreatePortalSession = <TError = ErrorType<UnauthorizedResponse | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPortalSession>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPortalSession>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreatePortalSessionMutationOptions(options));
+    }
+
+export const getListBillingPricesUrl = () => {
+
+
+
+
+  return `/api/billing/prices`
+}
+
+/**
+ * @summary List available Stripe prices/products (public)
+ */
+export const listBillingPrices = async ( options?: RequestInit): Promise<ListBillingPrices200> => {
+
+  return customFetch<ListBillingPrices200>(getListBillingPricesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListBillingPricesQueryKey = () => {
+    return [
+    `/api/billing/prices`
+    ] as const;
+    }
+
+
+export const getListBillingPricesQueryOptions = <TData = Awaited<ReturnType<typeof listBillingPrices>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBillingPrices>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListBillingPricesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listBillingPrices>>> = ({ signal }) => listBillingPrices({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listBillingPrices>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListBillingPricesQueryResult = NonNullable<Awaited<ReturnType<typeof listBillingPrices>>>
+export type ListBillingPricesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List available Stripe prices/products (public)
+ */
+
+export function useListBillingPrices<TData = Awaited<ReturnType<typeof listBillingPrices>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listBillingPrices>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListBillingPricesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateSubscriptionIntervalUrl = () => {
+
+
+
+
+  return `/api/billing/subscription`
+}
+
+/**
+ * @summary Switch billing interval without cancelling (e.g. monthly → annual)
+ */
+export const updateSubscriptionInterval = async (updateSubscriptionRequest: UpdateSubscriptionRequest, options?: RequestInit): Promise<UpdateSubscriptionResponse> => {
+
+  return customFetch<UpdateSubscriptionResponse>(getUpdateSubscriptionIntervalUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateSubscriptionRequest)
+  }
+);}
+
+
+
+
+export const getUpdateSubscriptionIntervalMutationOptions = <TError = ErrorType<BadRequestResponse | UnauthorizedResponse | NotFoundResponse | ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionInterval>>, TError,{data: BodyType<UpdateSubscriptionRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionInterval>>, TError,{data: BodyType<UpdateSubscriptionRequest>}, TContext> => {
+
+const mutationKey = ['updateSubscriptionInterval'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSubscriptionInterval>>, {data: BodyType<UpdateSubscriptionRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateSubscriptionInterval(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateSubscriptionIntervalMutationResult = NonNullable<Awaited<ReturnType<typeof updateSubscriptionInterval>>>
+    export type UpdateSubscriptionIntervalMutationBody = BodyType<UpdateSubscriptionRequest>
+    export type UpdateSubscriptionIntervalMutationError = ErrorType<BadRequestResponse | UnauthorizedResponse | NotFoundResponse | ErrorEnvelope>
+
+    /**
+ * @summary Switch billing interval without cancelling (e.g. monthly → annual)
+ */
+export const useUpdateSubscriptionInterval = <TError = ErrorType<BadRequestResponse | UnauthorizedResponse | NotFoundResponse | ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionInterval>>, TError,{data: BodyType<UpdateSubscriptionRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSubscriptionInterval>>,
+        TError,
+        {data: BodyType<UpdateSubscriptionRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateSubscriptionIntervalMutationOptions(options));
+    }
 
 export const getRequestUploadUrlUrl = () => {
 

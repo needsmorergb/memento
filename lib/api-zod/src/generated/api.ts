@@ -304,6 +304,26 @@ export const GetEventByTokenResponse = zod.object({
 
 
 /**
+ * @summary Get video job status for an event by share token (public)
+ */
+export const GetEventVideoStatusByTokenParams = zod.object({
+  "shareToken": zod.coerce.string()
+})
+
+export const GetEventVideoStatusByTokenResponse = zod.object({
+  "id": zod.string().uuid(),
+  "eventId": zod.string().uuid(),
+  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "videoUrl": zod.string().nullish(),
+  "durationCapSeconds": zod.number().optional(),
+  "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
+  "errorMessage": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "completedAt": zod.coerce.date().nullish()
+})
+
+
+/**
  * @summary Join an event as a guest
  */
 export const JoinEventBody = zod.object({
@@ -430,6 +450,7 @@ export const GetMySubscriptionResponse = zod.object({
   "status": zod.string(),
   "stripeSubscriptionId": zod.string().nullish(),
   "currentPeriodEnd": zod.coerce.date().nullish(),
+  "billingInterval": zod.enum(['monthly', 'annual']).nullish().describe('Billing interval for paid plans. Null for free tier.'),
   "videoDurationCapSeconds": zod.number().optional()
 })
 
@@ -457,6 +478,50 @@ export const GetVendorReferralCodeResponse = zod.object({
   "joinUrl": zod.string(),
   "benefitDescription": zod.string().nullish(),
   "videoDurationCapSeconds": zod.number().optional()
+})
+
+
+/**
+ * @summary Create a Stripe Checkout session for the given plan
+ */
+export const CreateCheckoutSessionBody = zod.object({
+  "plan": zod.enum(['pro', 'vendor']),
+  "interval": zod.enum(['monthly', 'annual']).optional().describe('Billing interval. Defaults to monthly. Annual only available for Pro.')
+})
+
+export const CreateCheckoutSessionResponse = zod.object({
+  "url": zod.string().url()
+})
+
+
+/**
+ * @summary Create a Stripe Customer Portal session
+ */
+export const CreatePortalSessionResponse = zod.object({
+  "url": zod.string().url()
+})
+
+
+/**
+ * @summary List available Stripe prices/products (public)
+ */
+export const ListBillingPricesResponse = zod.object({
+  "prices": zod.array(zod.object({
+
+}).passthrough())
+})
+
+
+/**
+ * @summary Switch billing interval without cancelling (e.g. monthly → annual)
+ */
+export const UpdateSubscriptionIntervalBody = zod.object({
+  "interval": zod.enum(['annual']).describe('The new billing interval. Currently only upgrading to annual is supported.')
+})
+
+export const UpdateSubscriptionIntervalResponse = zod.object({
+  "billingInterval": zod.enum(['monthly', 'annual']),
+  "currentPeriodEnd": zod.coerce.date().nullish()
 })
 
 

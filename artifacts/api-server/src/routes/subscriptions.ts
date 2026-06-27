@@ -24,6 +24,7 @@ router.get(
         status: subscription?.status ?? "active",
         stripeSubscriptionId: subscription?.stripeSubscriptionId ?? null,
         currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
+        billingInterval: subscription?.billingInterval ?? null,
         videoDurationCapSeconds: getDurationCap(tier),
       });
     } catch (err) {
