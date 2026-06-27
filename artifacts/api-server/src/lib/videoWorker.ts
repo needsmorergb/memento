@@ -11,7 +11,7 @@ import {
   eventGuestsTable,
   usersTable,
 } from "@workspace/db/schema";
-import { eq, and, isNull, asc, count, lt } from "drizzle-orm";
+import { eq, and, isNull, asc, count, lt, isNotNull, inArray } from "drizzle-orm";
 import { objectStorageClient } from "./objectStorage";
 import { sendPushNotifications, sendGuestEmails, sendHostEmail } from "./notifications";
 import { logger } from "./logger";
@@ -21,6 +21,10 @@ const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 30_000;
 const SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 const STUCK_JOB_TIMEOUT_MS = 30 * 60 * 1000;
+const XFADE_DUR = 0.5; // seconds crossfade overlap between clips
+const VIDEO_FILTER =
+  "scale=1280:720:force_original_aspect_ratio=decrease," +
+  "pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30";
 
 // ── Object storage helpers ────────────────────────────────────────────────
 
@@ -56,44 +60,30 @@ async function signObjectURL(opts: {
   return signed_url;
 }
 
-/**
- * Download an object from storage given its normalized path (/objects/uploads/uuid)
- * and write the bytes to destPath on the local filesystem.
- */
 async function downloadMediaToTmp(objectPath: string, destPath: string): Promise<void> {
   const privateDir = process.env.PRIVATE_OBJECT_DIR ?? "";
   if (!privateDir) throw new Error("PRIVATE_OBJECT_DIR not set");
-
-  // objectPath is like /objects/uploads/{uuid}
-  // Strip the leading /objects/ to get the entity sub-path
   const entitySubPath = objectPath.replace(/^\/objects\//, "");
-
   const { bucketName, objectName: dirName } = parseRawPath(privateDir);
   const fullObjectName = dirName ? `${dirName}/${entitySubPath}` : entitySubPath;
-
   const bucket = objectStorageClient.bucket(bucketName);
   const file = bucket.file(fullObjectName);
   const [exists] = await file.exists();
   if (!exists) throw new Error(`Object not found: ${fullObjectName}`);
-
   const [buffer] = await file.download();
   await writeFile(destPath, buffer);
 }
 
-/**
- * Upload a local file to object storage and return a signed 7-day GET URL.
- */
-async function uploadVideoToStorage(localPath: string, jobId: string): Promise<{ videoUrl: string; videoObjectPath: string }> {
+async function uploadVideoToStorage(
+  localPath: string,
+  jobId: string,
+): Promise<{ videoUrl: string; videoObjectPath: string }> {
   const privateDir = process.env.PRIVATE_OBJECT_DIR ?? "";
   if (!privateDir) throw new Error("PRIVATE_OBJECT_DIR not set");
-
   const { bucketName, objectName: dirName } = parseRawPath(privateDir);
   const objectName = dirName ? `${dirName}/videos/${jobId}.mp4` : `videos/${jobId}.mp4`;
-
-  // Get signed PUT URL and upload
   const putUrl = await signObjectURL({ bucketName, objectName, method: "PUT", ttlSec: 900 });
   const videoBuffer = await readFile(localPath);
-
   const putRes = await fetch(putUrl, {
     method: "PUT",
     headers: { "Content-Type": "video/mp4" },
@@ -101,21 +91,50 @@ async function uploadVideoToStorage(localPath: string, jobId: string): Promise<{
     signal: AbortSignal.timeout(300_000),
   });
   if (!putRes.ok) throw new Error(`Video upload failed: ${putRes.status}`);
-
-  // Generate a 7-day signed GET URL for playback
-  const videoUrl = await signObjectURL({ bucketName, objectName, method: "GET", ttlSec: 86400 * 7 });
-  const videoObjectPath = `/objects/videos/${jobId}.mp4`;
-
-  return { videoUrl, videoObjectPath };
+  const videoUrl = await signObjectURL({
+    bucketName,
+    objectName,
+    method: "GET",
+    ttlSec: 86400 * 7,
+  });
+  return { videoUrl, videoObjectPath: `/objects/videos/${jobId}.mp4` };
 }
 
-// ── ffmpeg helpers ─────────────────────────────────────────────────────────
+// ── ffprobe helper ────────────────────────────────────────────────────────
 
-const FFMPEG = "ffmpeg";
-const VIDEO_FILTER = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30";
+async function probeDuration(filePath: string): Promise<number> {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "default=noprint_wrappers=1:nokey=1",
+    filePath,
+  ]);
+  const dur = parseFloat(stdout.trim());
+  return isFinite(dur) && dur > 0 ? dur : 2;
+}
 
+async function probeHasAudio(filePath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "error",
+      "-select_streams", "a",
+      "-show_entries", "stream=codec_type",
+      "-of", "default=noprint_wrappers=1",
+      filePath,
+    ]);
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// ── Per-clip transcoding ───────────────────────────────────────────────────
+
+/**
+ * Photo → 2s normalized video clip with silent audio.
+ */
 async function makePhotoClip(inputPath: string, outputPath: string): Promise<void> {
-  await execFileAsync(FFMPEG, [
+  await execFileAsync("ffmpeg", [
     "-y",
     "-loop", "1", "-t", "2",
     "-i", inputPath,
@@ -129,29 +148,22 @@ async function makePhotoClip(inputPath: string, outputPath: string): Promise<voi
   ]);
 }
 
-async function makeVideoClip(inputPath: string, outputPath: string, maxDuration: number): Promise<void> {
-  // Probe for audio stream existence
-  let hasAudio = false;
-  try {
-    const { stdout } = await execFileAsync("ffprobe", [
-      "-v", "error",
-      "-select_streams", "a",
-      "-show_entries", "stream=codec_type",
-      "-of", "default=noprint_wrappers=1",
-      inputPath,
-    ]);
-    hasAudio = stdout.trim().length > 0;
-  } catch {
-    hasAudio = false;
-  }
-
+/**
+ * Video → normalized clip. Adds silent audio if source has no audio track.
+ * Trimmed to maxDuration.
+ */
+async function makeVideoClip(
+  inputPath: string,
+  outputPath: string,
+  maxDuration: number,
+): Promise<void> {
+  const hasAudio = await probeHasAudio(inputPath);
   if (hasAudio) {
-    await execFileAsync(FFMPEG, [
+    await execFileAsync("ffmpeg", [
       "-y",
       "-i", inputPath,
-      "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
       "-filter_complex",
-        `[0:v]${VIDEO_FILTER}[v];[0:a]aresample=44100[oa];[oa][1:a]amix=inputs=2:duration=first:dropout_transition=3[a]`,
+        `[0:v]${VIDEO_FILTER}[v];[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a]`,
       "-map", "[v]", "-map", "[a]",
       "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-ar", "44100", "-ac", "2",
@@ -159,7 +171,7 @@ async function makeVideoClip(inputPath: string, outputPath: string, maxDuration:
       outputPath,
     ]);
   } else {
-    await execFileAsync(FFMPEG, [
+    await execFileAsync("ffmpeg", [
       "-y",
       "-i", inputPath,
       "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
@@ -174,26 +186,42 @@ async function makeVideoClip(inputPath: string, outputPath: string, maxDuration:
   }
 }
 
-async function makeVoiceClip(inputPath: string, outputPath: string): Promise<void> {
-  // Voice note: black video frame + audio
-  await execFileAsync(FFMPEG, [
+/**
+ * Voice note → normalized AAC audio file (audio-only).
+ * This is NOT converted to a video clip; it's overlaid on the main timeline.
+ */
+async function extractVoiceAudio(inputPath: string, outputPath: string): Promise<void> {
+  await execFileAsync("ffmpeg", [
     "-y",
     "-i", inputPath,
-    "-f", "lavfi", "-i", "color=black:s=1280x720:r=30",
-    "-filter_complex", "[1:v]setsar=1[v];[0:a]aresample=44100[a]",
-    "-map", "[v]", "-map", "[a]",
-    "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
+    "-vn",
     "-c:a", "aac", "-ar", "44100", "-ac", "2",
-    "-shortest",
     outputPath,
   ]);
 }
 
-async function concatClips(clipPaths: string[], outputPath: string, durationCapSec: number): Promise<void> {
-  if (clipPaths.length === 1) {
-    await execFileAsync(FFMPEG, [
+// ── Assembly with xfade crossfades ────────────────────────────────────────
+
+interface Clip {
+  path: string;
+  duration: number;
+}
+
+/**
+ * Assemble visual clips with fade crossfades using ffmpeg's xfade + acrossfade filters.
+ * Applies duration cap and writes to outputPath.
+ */
+async function assembleWithCrossfades(
+  clips: Clip[],
+  outputPath: string,
+  durationCapSec: number,
+): Promise<void> {
+  if (clips.length === 0) throw new Error("No clips to assemble");
+
+  if (clips.length === 1) {
+    await execFileAsync("ffmpeg", [
       "-y",
-      "-i", clipPaths[0],
+      "-i", clips[0].path,
       "-t", String(durationCapSec),
       "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-ar", "44100", "-ac", "2",
@@ -202,14 +230,41 @@ async function concatClips(clipPaths: string[], outputPath: string, durationCapS
     return;
   }
 
-  // Write filelist for concat demuxer
-  const fileListPath = `${outputPath}.filelist.txt`;
-  await writeFile(fileListPath, clipPaths.map((p) => `file '${p}'`).join("\n"));
+  // Build inputs
+  const inputs: string[] = [];
+  for (const clip of clips) {
+    inputs.push("-i", clip.path);
+  }
 
-  await execFileAsync(FFMPEG, [
+  // Build filter_complex for xfade + acrossfade chains
+  const filterParts: string[] = [];
+  let vLabel = "[0:v]";
+  let aLabel = "[0:a]";
+  let timeOffset = 0;
+
+  for (let i = 1; i < clips.length; i++) {
+    const prevDuration = clips[i - 1].duration;
+    timeOffset += prevDuration - XFADE_DUR;
+
+    const nextVLabel = i === clips.length - 1 ? "[vout]" : `[v${i}]`;
+    const nextALabel = i === clips.length - 1 ? "[aout]" : `[a${i}]`;
+
+    filterParts.push(
+      `${vLabel}[${i}:v]xfade=transition=fade:duration=${XFADE_DUR}:offset=${timeOffset.toFixed(3)}${nextVLabel}`,
+    );
+    filterParts.push(
+      `${aLabel}[${i}:a]acrossfade=d=${XFADE_DUR}:c1=tri:c2=tri${nextALabel}`,
+    );
+
+    vLabel = nextVLabel;
+    aLabel = nextALabel;
+  }
+
+  await execFileAsync("ffmpeg", [
     "-y",
-    "-f", "concat", "-safe", "0",
-    "-i", fileListPath,
+    ...inputs,
+    "-filter_complex", filterParts.join(";"),
+    "-map", "[vout]", "-map", "[aout]",
     "-c:v", "libx264", "-preset", "fast", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-ar", "44100", "-ac", "2",
     "-t", String(durationCapSec),
@@ -217,8 +272,52 @@ async function concatClips(clipPaths: string[], outputPath: string, durationCapS
   ]);
 }
 
+/**
+ * Concatenate audio-only files (voice notes) into a single AAC file.
+ */
+async function concatVoiceAudio(audioPaths: string[], outputPath: string): Promise<void> {
+  if (audioPaths.length === 1) {
+    await execFileAsync("ffmpeg", ["-y", "-i", audioPaths[0], "-c", "copy", outputPath]);
+    return;
+  }
+  const fileListPath = `${outputPath}.filelist.txt`;
+  await writeFile(fileListPath, audioPaths.map((p) => `file '${p}'`).join("\n"));
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-f", "concat", "-safe", "0",
+    "-i", fileListPath,
+    "-c:a", "aac", "-ar", "44100", "-ac", "2",
+    outputPath,
+  ]);
+}
+
+/**
+ * Mix a voice-note audio track over the assembled visual video.
+ * Voice notes play at 0.4 relative weight — audible over silence, blended
+ * under original video audio.
+ */
+async function overlayVoiceAudio(
+  videoPath: string,
+  voiceAudioPath: string,
+  outputPath: string,
+  durationCapSec: number,
+): Promise<void> {
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-i", videoPath,
+    "-i", voiceAudioPath,
+    "-filter_complex",
+      "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.4[a]",
+    "-map", "0:v", "-map", "[a]",
+    "-c:v", "copy",
+    "-c:a", "aac", "-ar", "44100", "-ac", "2",
+    "-t", String(durationCapSec),
+    outputPath,
+  ]);
+}
+
 async function makePlaceholderVideo(outputPath: string, durationSec: number): Promise<void> {
-  await execFileAsync(FFMPEG, [
+  await execFileAsync("ffmpeg", [
     "-y",
     "-f", "lavfi", "-i", `color=black:s=1280x720:r=30:d=${durationSec}`,
     "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
@@ -232,7 +331,6 @@ async function makePlaceholderVideo(outputPath: string, durationSec: number): Pr
 // ── Core job processor ────────────────────────────────────────────────────
 
 async function processVideoJob(jobId: string): Promise<void> {
-  // Atomically claim the job: only proceed if it's still pending
   const claimed = await db
     .update(videoJobsTable)
     .set({ status: "processing", startedAt: new Date(), updatedAt: new Date() })
@@ -240,7 +338,7 @@ async function processVideoJob(jobId: string): Promise<void> {
     .returning();
 
   if (!claimed.length) {
-    logger.info({ jobId }, "Job already claimed by another worker, skipping");
+    logger.info({ jobId }, "Job already claimed, skipping");
     return;
   }
 
@@ -249,9 +347,8 @@ async function processVideoJob(jobId: string): Promise<void> {
 
   try {
     await mkdir(workDir, { recursive: true });
-    logger.info({ jobId, eventId: job.eventId, tier: job.tier }, "Video job processing started");
+    logger.info({ jobId, eventId: job.eventId, tier: job.tier }, "Video job started");
 
-    // Fetch all media for the event sorted by creation time
     const mediaItems = await db.query.mediaItemsTable.findMany({
       where: and(eq(mediaItemsTable.eventId, job.eventId), isNull(mediaItemsTable.deletedAt)),
       orderBy: (t, { asc }) => [asc(t.createdAt)],
@@ -259,96 +356,175 @@ async function processVideoJob(jobId: string): Promise<void> {
 
     logger.info({ jobId, itemCount: mediaItems.length }, "Media items fetched");
 
-    const clipPaths: string[] = [];
-    let clipIndex = 0;
+    // Separate visual clips from voice notes
+    const visualClips: Clip[] = [];
+    const voiceAudioPaths: string[] = [];
+    let idx = 0;
 
     for (const item of mediaItems) {
       const ext =
         item.mediaType === "photo" ? "jpg" :
         item.mediaType === "voice_note" ? "m4a" :
         "mp4";
-      const inputPath = join(workDir, `input_${clipIndex}.${ext}`);
-      const clipPath = join(workDir, `clip_${clipIndex}.mp4`);
+      const inputPath = join(workDir, `input_${idx}.${ext}`);
 
-      // Download media from object storage
       try {
         await downloadMediaToTmp(item.objectPath, inputPath);
       } catch (err) {
-        logger.warn({ err, objectPath: item.objectPath }, "Failed to download media item, skipping");
-        clipIndex++;
+        logger.warn({ err, objectPath: item.objectPath }, "Download failed, skipping");
+        idx++;
         continue;
       }
 
-      // Transcode to uniform format
-      try {
-        if (item.mediaType === "photo") {
+      if (item.mediaType === "photo") {
+        const clipPath = join(workDir, `clip_${idx}.mp4`);
+        try {
           await makePhotoClip(inputPath, clipPath);
-        } else if (item.mediaType === "video") {
-          await makeVideoClip(inputPath, clipPath, job.durationCapSeconds);
-        } else {
-          await makeVoiceClip(inputPath, clipPath);
+          const duration = await probeDuration(clipPath);
+          visualClips.push({ path: clipPath, duration });
+          logger.info({ jobId, idx, mediaType: "photo", duration }, "Photo clip created");
+        } catch (err) {
+          logger.warn({ err }, "Photo clip failed, skipping");
         }
-        clipPaths.push(clipPath);
-        logger.info({ jobId, clipIndex, mediaType: item.mediaType }, "Clip created");
-      } catch (err) {
-        logger.warn({ err, mediaType: item.mediaType, objectPath: item.objectPath }, "Failed to create clip, skipping");
+      } else if (item.mediaType === "video") {
+        const clipPath = join(workDir, `clip_${idx}.mp4`);
+        try {
+          await makeVideoClip(inputPath, clipPath, job.durationCapSeconds);
+          const duration = await probeDuration(clipPath);
+          visualClips.push({ path: clipPath, duration });
+          logger.info({ jobId, idx, mediaType: "video", duration }, "Video clip created");
+        } catch (err) {
+          logger.warn({ err }, "Video clip failed, skipping");
+        }
+      } else {
+        // voice_note — extract audio only; will be overlaid on the full timeline
+        const audioPath = join(workDir, `voice_${idx}.aac`);
+        try {
+          await extractVoiceAudio(inputPath, audioPath);
+          voiceAudioPaths.push(audioPath);
+          logger.info({ jobId, idx }, "Voice note audio extracted");
+        } catch (err) {
+          logger.warn({ err }, "Voice note extraction failed, skipping");
+        }
       }
 
-      clipIndex++;
+      idx++;
     }
 
+    const assembledPath = join(workDir, "assembled.mp4");
     const outputPath = join(workDir, "output.mp4");
 
-    if (clipPaths.length === 0) {
-      logger.warn({ jobId }, "No clips available, generating placeholder video");
-      await makePlaceholderVideo(outputPath, Math.min(job.durationCapSeconds, 5));
+    // Step 1: Assemble visual clips with crossfade transitions
+    if (visualClips.length === 0) {
+      logger.warn({ jobId }, "No visual clips — generating placeholder");
+      await makePlaceholderVideo(assembledPath, Math.min(job.durationCapSeconds, 5));
     } else {
-      await concatClips(clipPaths, outputPath, job.durationCapSeconds);
+      logger.info({ jobId, clipCount: visualClips.length }, "Assembling with crossfades");
+      await assembleWithCrossfades(visualClips, assembledPath, job.durationCapSeconds);
     }
 
-    logger.info({ jobId }, "Compilation complete, uploading to storage");
+    // Step 2: Overlay voice notes as audio over the assembled video (if any)
+    if (voiceAudioPaths.length > 0) {
+      logger.info({ jobId, voiceCount: voiceAudioPaths.length }, "Overlaying voice notes");
+      const voiceConcatPath = join(workDir, "voice_concat.aac");
+      await concatVoiceAudio(voiceAudioPaths, voiceConcatPath);
+      await overlayVoiceAudio(assembledPath, voiceConcatPath, outputPath, job.durationCapSeconds);
+    } else {
+      // No voice notes: assembled video is the final output
+      await execFileAsync("ffmpeg", [
+        "-y", "-i", assembledPath,
+        "-t", String(job.durationCapSeconds),
+        "-c", "copy",
+        outputPath,
+      ]);
+    }
 
-    // Upload to object storage
+    logger.info({ jobId }, "Compilation done, uploading to storage");
+
     const { videoUrl, videoObjectPath } = await uploadVideoToStorage(outputPath, jobId);
 
-    // Mark job completed
     await db
       .update(videoJobsTable)
-      .set({ status: "completed", videoUrl, videoObjectPath, completedAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: "completed",
+        videoUrl,
+        videoObjectPath,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(videoJobsTable.id, jobId));
 
-    logger.info({ jobId, videoUrl }, "Video job completed, dispatching notifications");
+    logger.info({ jobId, videoUrl }, "Job completed — dispatching notifications");
 
-    // Fetch event, guests, and host for notifications
-    const event = await db.query.eventsTable.findFirst({ where: eq(eventsTable.id, job.eventId) });
+    const event = await db.query.eventsTable.findFirst({
+      where: eq(eventsTable.id, job.eventId),
+    });
     if (!event) {
       logger.warn({ jobId }, "Event not found for notifications");
       return;
     }
 
-    const guests = await db.query.eventGuestsTable.findMany({
-      where: and(eq(eventGuestsTable.eventId, job.eventId), isNull(eventGuestsTable.deletedAt)),
-    });
+    // Identify guests who uploaded media (notification targets per spec)
+    const uploaderRows = await db
+      .selectDistinct({ guestId: mediaItemsTable.guestId })
+      .from(mediaItemsTable)
+      .where(
+        and(
+          eq(mediaItemsTable.eventId, job.eventId),
+          isNull(mediaItemsTable.deletedAt),
+          isNotNull(mediaItemsTable.guestId),
+        ),
+      );
+    const uploaderIds = uploaderRows.map((r) => r.guestId!);
 
-    const host = await db.query.usersTable.findFirst({ where: eq(usersTable.id, event.hostId) });
+    const notifiableGuests =
+      uploaderIds.length > 0
+        ? await db.query.eventGuestsTable.findMany({
+            where: and(
+              eq(eventGuestsTable.eventId, job.eventId),
+              isNull(eventGuestsTable.deletedAt),
+              inArray(eventGuestsTable.id, uploaderIds),
+            ),
+          })
+        : [];
+
+    const host = await db.query.usersTable.findFirst({
+      where: eq(usersTable.id, event.hostId),
+    });
 
     const [{ value: mediaCount }] = await db
       .select({ value: count() })
       .from(mediaItemsTable)
       .where(and(eq(mediaItemsTable.eventId, job.eventId), isNull(mediaItemsTable.deletedAt)));
 
-    // Notifications run in parallel — failures logged but don't fail the job
+    // All guest count (for host summary)
+    const [{ value: guestCount }] = await db
+      .select({ value: count() })
+      .from(eventGuestsTable)
+      .where(and(eq(eventGuestsTable.eventId, job.eventId), isNull(eventGuestsTable.deletedAt)));
+
     await Promise.allSettled([
-      sendPushNotifications(guests, event.title, videoUrl),
-      sendGuestEmails(guests, event, videoUrl),
-      host ? sendHostEmail(host, event, videoUrl, guests.length, Number(mediaCount), job.tier) : Promise.resolve(),
+      sendPushNotifications(notifiableGuests, event.title, videoUrl),
+      sendGuestEmails(notifiableGuests, event, videoUrl),
+      host
+        ? sendHostEmail(
+            host,
+            event,
+            videoUrl,
+            Number(guestCount),
+            Number(mediaCount),
+            job.tier,
+          )
+        : Promise.resolve(),
     ]);
 
-    logger.info({ jobId }, "All notifications dispatched");
+    logger.info(
+      { jobId, notifiedGuests: notifiableGuests.length },
+      "All notifications dispatched",
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     logger.error({ err, jobId }, "Video job failed");
-
     await db
       .update(videoJobsTable)
       .set({ status: "failed", errorMessage: message.slice(0, 1000), updatedAt: new Date() })
@@ -368,7 +544,7 @@ async function pollAndProcess(): Promise<void> {
   isRunning = true;
 
   try {
-    // Reset stuck processing jobs (started > STUCK_JOB_TIMEOUT_MS ago)
+    // Reset stuck processing jobs older than the timeout threshold
     const stuckThreshold = new Date(Date.now() - STUCK_JOB_TIMEOUT_MS);
     await db
       .update(videoJobsTable)
@@ -381,7 +557,6 @@ async function pollAndProcess(): Promise<void> {
       )
       .catch(() => {});
 
-    // Find the oldest pending job
     const pending = await db.query.videoJobsTable.findFirst({
       where: eq(videoJobsTable.status, "pending"),
       orderBy: (t, { asc }) => [asc(t.createdAt)],
@@ -400,11 +575,9 @@ async function pollAndProcess(): Promise<void> {
 
 export function startVideoWorker(): void {
   logger.info("Starting video worker (DB polling every 30s)");
-  // Initial poll after 5s to let the server fully boot
   setTimeout(() => {
     pollAndProcess().catch((err) => logger.error({ err }, "Initial poll failed"));
   }, 5_000);
-  // Recurring poll
   setInterval(() => {
     pollAndProcess().catch((err) => logger.error({ err }, "Recurring poll failed"));
   }, POLL_INTERVAL_MS);
