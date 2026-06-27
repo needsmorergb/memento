@@ -466,6 +466,77 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  # ── Billing ────────────────────────────────────────────────────────────────
+
+  /billing/checkout:
+    post:
+      operationId: createCheckoutSession
+      tags: [subscriptions]
+      summary: Create a Stripe Checkout session for the given plan
+      security:
+        - clerkAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCheckoutRequest"
+      responses:
+        "200":
+          description: Checkout URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Stripe products not yet seeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /billing/portal:
+    post:
+      operationId: createPortalSession
+      tags: [subscriptions]
+      summary: Create a Stripe Customer Portal session
+      security:
+        - clerkAuth: []
+      responses:
+        "200":
+          description: Portal URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /billing/prices:
+    get:
+      operationId: listBillingPrices
+      tags: [subscriptions]
+      summary: List available Stripe prices/products (public)
+      responses:
+        "200":
+          description: Price list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prices]
+                properties:
+                  prices:
+                    type: array
+                    items:
+                      type: object
+
   # ── Storage ────────────────────────────────────────────────────────────────
 
   /storage/uploads/request-url:
@@ -924,6 +995,22 @@ components:
           nullable: true
         videoDurationCapSeconds:
           type: integer
+
+    CreateCheckoutRequest:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          type: string
+          enum: [pro, vendor]
+
+    CheckoutResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
 
     VideoJobStatus:
       type: object

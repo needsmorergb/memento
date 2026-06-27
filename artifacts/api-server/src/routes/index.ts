@@ -7,6 +7,7 @@ import guestsRouter from "./guests";
 import mediaRouter from "./media";
 import subscriptionsRouter from "./subscriptions";
 import vendorsRouter from "./vendors";
+import billingRouter from "./billing";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(guestsRouter);
 router.use(mediaRouter);
 router.use(subscriptionsRouter);
 router.use(vendorsRouter);
+router.use(billingRouter);
 
 export default router;

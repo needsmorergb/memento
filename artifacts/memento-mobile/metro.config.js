@@ -1,3 +1,10 @@
 const { getDefaultConfig } = require("expo/metro-config");
 
-module.exports = getDefaultConfig(__dirname);
+const config = getDefaultConfig(__dirname);
+
+// Exclude Stripe runtime temp directories (created briefly then deleted, causing watcher errors)
+config.resolver.blockList = [
+  /stripe_tmp_[^/]+\//,
+];
+
+module.exports = config;

@@ -62,6 +62,11 @@ function AppDownloadBanner() {
 
 function UpgradeBanner({ tier }: { tier?: string | null }) {
   if (tier && tier !== "free") return null;
+
+  function handleUpgrade() {
+    window.location.href = "/host?upgrade=pro";
+  }
+
   return (
     <Card className="mt-4 border-amber-200 bg-amber-50" data-testid="card-upgrade-prompt">
       <CardContent className="py-5 flex flex-col sm:flex-row items-center gap-4">
@@ -74,9 +79,9 @@ function UpgradeBanner({ tier }: { tier?: string | null }) {
             Upgrade to Pro to get up to 5 minutes — every moment, not just the highlights.
           </p>
         </div>
-        <a href="/#pricing" data-testid="link-upgrade">
-          <Button size="sm" className="flex-shrink-0">Upgrade to Pro</Button>
-        </a>
+        <Button size="sm" className="flex-shrink-0" onClick={handleUpgrade} data-testid="link-upgrade">
+          Upgrade to Pro
+        </Button>
       </CardContent>
     </Card>
   );

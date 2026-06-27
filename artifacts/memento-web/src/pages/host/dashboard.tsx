@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useClerk, useUser } from "@clerk/react";
 import { useListMyEvents, useCreateEvent, useGetMySubscription, getListMyEventsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, Plus, LogOut, Calendar, Users, Image, ChevronRight, Clock, CheckCircle, Radio } from "lucide-react";
+import { Camera, Plus, LogOut, Calendar, Users, Image, ChevronRight, Clock, CheckCircle, Radio, Star, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { redirectToCheckout, redirectToPortal } from "@/lib/billing";
 
 const statusConfig = {
   upcoming: { label: "Upcoming", icon: Clock, className: "bg-blue-100 text-blue-700" },
@@ -36,6 +37,29 @@ export default function HostDashboard() {
   const [description, setDescription] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [endTime, setEndTime] = useState("");
+
+  // Handle return from Stripe checkout or auto-trigger upgrade
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get("checkout");
+    const upgrade = params.get("upgrade") as "pro" | "vendor" | null;
+
+    if (checkout === "success") {
+      toast({
+        title: "Subscription activated!",
+        description: "Your plan is now active. Your next event will reflect the new video length cap.",
+      });
+      window.history.replaceState({}, "", "/host");
+    } else if (checkout === "cancelled") {
+      toast({ title: "Checkout cancelled", description: "No changes were made." });
+      window.history.replaceState({}, "", "/host");
+    } else if (upgrade === "pro" || upgrade === "vendor") {
+      window.history.replaceState({}, "", "/host");
+      redirectToCheckout(upgrade).catch(() =>
+        toast({ title: "Billing error", description: "Could not open checkout. Please try again.", variant: "destructive" })
+      );
+    }
+  }, []);
 
   const events = eventsData?.events ?? [];
 
@@ -105,8 +129,31 @@ export default function HostDashboard() {
           </Button>
         </div>
 
-        {/* Vendor link */}
-        <div className="mb-8 flex gap-3">
+        {/* Tier / billing actions */}
+        <div className="mb-8 flex flex-wrap gap-3">
+          {subscription?.tier === "free" && (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => redirectToCheckout("pro").catch(() => toast({ title: "Billing error", description: "Could not open checkout. Please try again.", variant: "destructive" }))}
+              data-testid="button-upgrade-pro"
+            >
+              <Star className="w-3.5 h-3.5" />
+              Upgrade to Pro
+            </Button>
+          )}
+          {(subscription?.tier === "pro" || subscription?.tier === "vendor") && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => redirectToPortal().catch(() => toast({ title: "Billing error", description: "Could not open billing portal.", variant: "destructive" }))}
+              data-testid="button-manage-subscription"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              Manage subscription
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setLocation("/vendor")} data-testid="button-vendor-portal">
             Vendor portal
           </Button>
