@@ -523,4 +523,46 @@ router.get("/events/token/:shareToken", async (req, res) => {
   }
 });
 
+// Get video status by share token (PUBLIC — used by email link recipients on any device)
+// Returns video status only when a job exists; 404 if no job yet.
+router.get("/events/token/:shareToken/video-status", async (req, res) => {
+  try {
+    const event = await db.query.eventsTable.findFirst({
+      where: and(
+        eq(eventsTable.shareToken, String(req.params.shareToken)),
+        isNull(eventsTable.deletedAt),
+      ),
+    });
+
+    if (!event) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    const job = await db.query.videoJobsTable.findFirst({
+      where: eq(videoJobsTable.eventId, event.id),
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+    });
+
+    if (!job) {
+      res.status(404).json({ error: "No video job found for this event" });
+      return;
+    }
+
+    res.json({
+      id: job.id,
+      eventId: job.eventId,
+      status: job.status,
+      videoUrl: job.videoUrl,
+      durationCapSeconds: job.durationCapSeconds,
+      tier: job.tier,
+      errorMessage: job.errorMessage,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

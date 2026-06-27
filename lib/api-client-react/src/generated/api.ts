@@ -885,6 +885,62 @@ export function useGetEventVideoStatus<TData = Awaited<ReturnType<typeof getEven
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+// ── Public video status by share token (no auth required) ──────────────────
+export const getGetEventVideoStatusByTokenUrl = (shareToken: string) =>
+  `/api/events/token/${shareToken}/video-status`;
+
+export const getEventVideoStatusByToken = async (
+  shareToken: string,
+  options?: RequestInit,
+): Promise<VideoJobStatus> =>
+  customFetch<VideoJobStatus>(getGetEventVideoStatusByTokenUrl(shareToken), {
+    ...options,
+    method: 'GET',
+  });
+
+export const getGetEventVideoStatusByTokenQueryKey = (shareToken: string) =>
+  [`/api/events/token/${shareToken}/video-status`] as const;
+
+export const getGetEventVideoStatusByTokenQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEventVideoStatusByToken>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  shareToken: string,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getGetEventVideoStatusByTokenQueryKey(shareToken);
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getEventVideoStatusByToken>>> = ({
+    signal,
+  }) => getEventVideoStatusByToken(shareToken, { signal, ...requestOptions });
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shareToken,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData> & {
+    queryKey: QueryKey;
+  };
+};
+
+export function useGetEventVideoStatusByToken<
+  TData = Awaited<ReturnType<typeof getEventVideoStatusByToken>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  shareToken: string,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getEventVideoStatusByToken>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEventVideoStatusByTokenQueryOptions(shareToken, options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 
 
 
