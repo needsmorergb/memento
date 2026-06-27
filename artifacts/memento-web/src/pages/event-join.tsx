@@ -217,12 +217,16 @@ export default function EventJoin() {
   const joinEvent = useJoinEvent();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [referralCode, setReferralCode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("ref") ?? "";
+  });
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
     if (!name || !eventInfo) return;
     joinEvent.mutate(
-      { data: { shareToken, displayName: name, email: email || undefined } },
+      { data: { shareToken, displayName: name, email: email || undefined, referralCode: referralCode.trim() || undefined } },
       {
         onSuccess: (res) => {
           const token = res.guest.guestToken ?? res.guest.id;
@@ -325,6 +329,19 @@ export default function EventJoin() {
                 />
                 <p className="text-xs text-muted-foreground">
                   We'll send you the same-day edit video when it's ready
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="referralCode">Vendor referral code (optional)</Label>
+                <Input
+                  id="referralCode"
+                  placeholder="e.g. JANESMITH"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                  data-testid="input-referral-code"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Got a code from your photographer or event planner? Enter it for an extended video edit.
                 </p>
               </div>
               <Button

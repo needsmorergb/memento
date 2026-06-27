@@ -10,6 +10,7 @@ import {
   useDeleteEvent,
   getGetEventQueryKey,
   getGetEventVideoStatusQueryKey,
+  getGetEventQrPayloadQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
@@ -111,7 +112,7 @@ export default function EventDetail() {
 
   const { data: event, isLoading } = useGetEvent(eventId);
   const { data: guestsData, isLoading: guestsLoading } = useListEventGuests(eventId);
-  const { data: qrPayload } = useGetEventQrPayload(eventId, { query: { enabled: !!event } });
+  const { data: qrPayload } = useGetEventQrPayload(eventId, { query: { enabled: !!event, queryKey: getGetEventQrPayloadQueryKey(eventId) } });
   const { data: videoStatus } = useGetEventVideoStatus(eventId, {
     query: {
       enabled: event?.status === "ended",

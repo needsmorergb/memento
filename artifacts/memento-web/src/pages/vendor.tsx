@@ -175,7 +175,9 @@ export default function VendorPage() {
                   <div className="grid grid-cols-2 gap-4 pt-2">
                     <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
                       <div className="text-2xl font-bold text-primary mb-1" data-testid="text-video-cap">
-                        {Math.floor(codeInfo.videoDurationCapSeconds / 60)}:{String(codeInfo.videoDurationCapSeconds % 60).padStart(2, "0")}
+                        {codeInfo.videoDurationCapSeconds != null
+                          ? `${Math.floor(codeInfo.videoDurationCapSeconds / 60)}:${String(codeInfo.videoDurationCapSeconds % 60).padStart(2, "0")}`
+                          : "3:00"}
                       </div>
                       <div className="text-xs text-muted-foreground">Video cap for clients</div>
                     </div>
@@ -211,7 +213,7 @@ export default function VendorPage() {
                 <ol className="space-y-3 text-sm text-muted-foreground list-decimal list-inside">
                   <li>Share your code <strong className="text-foreground">{codeInfo?.code ?? "..."}</strong> with your client</li>
                   <li>When they join the event, they enter your code in the join form</li>
-                  <li>Their same-day edit video will be up to {codeInfo ? `${Math.floor(codeInfo.videoDurationCapSeconds / 60)} minutes` : "3 minutes"} long</li>
+                  <li>Their same-day edit video will be up to {codeInfo?.videoDurationCapSeconds != null ? `${Math.floor(codeInfo.videoDurationCapSeconds / 60)} minutes` : "3 minutes"} long</li>
                 </ol>
               </CardContent>
             </Card>
