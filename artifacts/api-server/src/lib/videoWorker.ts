@@ -11,7 +11,7 @@ import {
   eventGuestsTable,
   usersTable,
 } from "@workspace/db/schema";
-import { eq, and, isNull, asc, count, lt, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, isNull, asc, count, lt } from "drizzle-orm";
 import { objectStorageClient } from "./objectStorage";
 import { sendPushNotifications, sendGuestEmails, sendHostEmail } from "./notifications";
 import { logger } from "./logger";
@@ -200,6 +200,12 @@ async function extractVoiceAudio(inputPath: string, outputPath: string): Promise
   ]);
 }
 
+interface VoiceNote {
+  audioPath: string;
+  /** Milliseconds from the first media item's timestamp — used for adelay placement */
+  delayMs: number;
+}
+
 // ── Assembly with xfade crossfades ────────────────────────────────────────
 
 interface Clip {
@@ -273,42 +279,44 @@ async function assembleWithCrossfades(
 }
 
 /**
- * Concatenate audio-only files (voice notes) into a single AAC file.
+ * Build a positioned voice audio track by applying adelay to each voice note
+ * based on its real-world timestamp offset from the first media item.
+ * All delayed tracks are mixed together, then overlaid on the visual video at 0.4 weight.
  */
-async function concatVoiceAudio(audioPaths: string[], outputPath: string): Promise<void> {
-  if (audioPaths.length === 1) {
-    await execFileAsync("ffmpeg", ["-y", "-i", audioPaths[0], "-c", "copy", outputPath]);
-    return;
-  }
-  const fileListPath = `${outputPath}.filelist.txt`;
-  await writeFile(fileListPath, audioPaths.map((p) => `file '${p}'`).join("\n"));
-  await execFileAsync("ffmpeg", [
-    "-y",
-    "-f", "concat", "-safe", "0",
-    "-i", fileListPath,
-    "-c:a", "aac", "-ar", "44100", "-ac", "2",
-    outputPath,
-  ]);
-}
-
-/**
- * Mix a voice-note audio track over the assembled visual video.
- * Voice notes play at 0.4 relative weight — audible over silence, blended
- * under original video audio.
- */
-async function overlayVoiceAudio(
+async function overlayVoiceNotesChronological(
   videoPath: string,
-  voiceAudioPath: string,
+  voiceNotes: VoiceNote[],
   outputPath: string,
   durationCapSec: number,
 ): Promise<void> {
+  if (voiceNotes.length === 0) throw new Error("No voice notes provided");
+
+  // Build inputs and filter graph
+  const inputs: string[] = ["-i", videoPath];
+  const filterParts: string[] = [];
+  const mixLabels: string[] = [];
+
+  for (let i = 0; i < voiceNotes.length; i++) {
+    inputs.push("-i", voiceNotes[i].audioPath);
+    // adelay format: "delayMs|delayMs" for stereo channels; all=1 applies to all channels
+    const delayMs = Math.max(0, Math.round(voiceNotes[i].delayMs));
+    const voiceLabel = `[va${i}]`;
+    filterParts.push(`[${i + 1}:a]adelay=${delayMs}:all=1${voiceLabel}`);
+    mixLabels.push(voiceLabel);
+  }
+
+  // Mix all positioned voice tracks together
+  filterParts.push(
+    `${mixLabels.join("")}amix=inputs=${voiceNotes.length}:duration=longest:normalize=0[voice_mix]`,
+  );
+  // Blend with main video audio (voice at 0.4 weight)
+  filterParts.push("[0:a][voice_mix]amix=inputs=2:duration=first:weights=1 0.4[aout]");
+
   await execFileAsync("ffmpeg", [
     "-y",
-    "-i", videoPath,
-    "-i", voiceAudioPath,
-    "-filter_complex",
-      "[0:a][1:a]amix=inputs=2:duration=first:weights=1 0.4[a]",
-    "-map", "0:v", "-map", "[a]",
+    ...inputs,
+    "-filter_complex", filterParts.join(";"),
+    "-map", "0:v", "-map", "[aout]",
     "-c:v", "copy",
     "-c:a", "aac", "-ar", "44100", "-ac", "2",
     "-t", String(durationCapSec),
@@ -356,9 +364,11 @@ async function processVideoJob(jobId: string): Promise<void> {
 
     logger.info({ jobId, itemCount: mediaItems.length }, "Media items fetched");
 
-    // Separate visual clips from voice notes
+    // Separate visual clips from voice notes, tracking timestamps for chronological placement
     const visualClips: Clip[] = [];
-    const voiceAudioPaths: string[] = [];
+    const voiceNotes: VoiceNote[] = [];
+    // Anchor timestamp: creation time of the first media item, for computing delays
+    const anchorTime = mediaItems.length > 0 ? mediaItems[0].createdAt.getTime() : Date.now();
     let idx = 0;
 
     for (const item of mediaItems) {
@@ -397,12 +407,13 @@ async function processVideoJob(jobId: string): Promise<void> {
           logger.warn({ err }, "Video clip failed, skipping");
         }
       } else {
-        // voice_note — extract audio only; will be overlaid on the full timeline
+        // voice_note — extract audio only and record delay from anchor timestamp
         const audioPath = join(workDir, `voice_${idx}.aac`);
         try {
           await extractVoiceAudio(inputPath, audioPath);
-          voiceAudioPaths.push(audioPath);
-          logger.info({ jobId, idx }, "Voice note audio extracted");
+          const delayMs = Math.max(0, item.createdAt.getTime() - anchorTime);
+          voiceNotes.push({ audioPath, delayMs });
+          logger.info({ jobId, idx, delayMs }, "Voice note audio extracted");
         } catch (err) {
           logger.warn({ err }, "Voice note extraction failed, skipping");
         }
@@ -423,14 +434,12 @@ async function processVideoJob(jobId: string): Promise<void> {
       await assembleWithCrossfades(visualClips, assembledPath, job.durationCapSeconds);
     }
 
-    // Step 2: Overlay voice notes as audio over the assembled video (if any)
-    if (voiceAudioPaths.length > 0) {
-      logger.info({ jobId, voiceCount: voiceAudioPaths.length }, "Overlaying voice notes");
-      const voiceConcatPath = join(workDir, "voice_concat.aac");
-      await concatVoiceAudio(voiceAudioPaths, voiceConcatPath);
-      await overlayVoiceAudio(assembledPath, voiceConcatPath, outputPath, job.durationCapSeconds);
+    // Step 2: Overlay voice notes chronologically over the assembled video
+    if (voiceNotes.length > 0) {
+      logger.info({ jobId, voiceCount: voiceNotes.length }, "Overlaying voice notes chronologically");
+      await overlayVoiceNotesChronological(assembledPath, voiceNotes, outputPath, job.durationCapSeconds);
     } else {
-      // No voice notes: assembled video is the final output
+      // No voice notes: pass assembled video through with duration cap
       await execFileAsync("ffmpeg", [
         "-y", "-i", assembledPath,
         "-t", String(job.durationCapSeconds),
@@ -464,29 +473,10 @@ async function processVideoJob(jobId: string): Promise<void> {
       return;
     }
 
-    // Identify guests who uploaded media (notification targets per spec)
-    const uploaderRows = await db
-      .selectDistinct({ guestId: mediaItemsTable.guestId })
-      .from(mediaItemsTable)
-      .where(
-        and(
-          eq(mediaItemsTable.eventId, job.eventId),
-          isNull(mediaItemsTable.deletedAt),
-          isNotNull(mediaItemsTable.guestId),
-        ),
-      );
-    const uploaderIds = uploaderRows.map((r) => r.guestId!);
-
-    const notifiableGuests =
-      uploaderIds.length > 0
-        ? await db.query.eventGuestsTable.findMany({
-            where: and(
-              eq(eventGuestsTable.eventId, job.eventId),
-              isNull(eventGuestsTable.deletedAt),
-              inArray(eventGuestsTable.id, uploaderIds),
-            ),
-          })
-        : [];
+    // Fetch all guests for notification dispatch
+    const allGuests = await db.query.eventGuestsTable.findMany({
+      where: and(eq(eventGuestsTable.eventId, job.eventId), isNull(eventGuestsTable.deletedAt)),
+    });
 
     const host = await db.query.usersTable.findFirst({
       where: eq(usersTable.id, event.hostId),
@@ -497,21 +487,19 @@ async function processVideoJob(jobId: string): Promise<void> {
       .from(mediaItemsTable)
       .where(and(eq(mediaItemsTable.eventId, job.eventId), isNull(mediaItemsTable.deletedAt)));
 
-    // All guest count (for host summary)
-    const [{ value: guestCount }] = await db
-      .select({ value: count() })
-      .from(eventGuestsTable)
-      .where(and(eq(eventGuestsTable.eventId, job.eventId), isNull(eventGuestsTable.deletedAt)));
-
+    // Push: all guests who joined the event (covers both "uploaded" and "viewed" — view
+    // tracking is not yet in the schema, so all attendees are treated as potential viewers)
+    //
+    // Email: all guests who provided an email address (not filtered to uploaders only)
     await Promise.allSettled([
-      sendPushNotifications(notifiableGuests, event.title, videoUrl),
-      sendGuestEmails(notifiableGuests, event, videoUrl),
+      sendPushNotifications(allGuests, event.title, videoUrl),
+      sendGuestEmails(allGuests, event, videoUrl),
       host
         ? sendHostEmail(
             host,
             event,
             videoUrl,
-            Number(guestCount),
+            allGuests.length,
             Number(mediaCount),
             job.tier,
           )
@@ -519,7 +507,7 @@ async function processVideoJob(jobId: string): Promise<void> {
     ]);
 
     logger.info(
-      { jobId, notifiedGuests: notifiableGuests.length },
+      { jobId, guestCount: allGuests.length },
       "All notifications dispatched",
     );
   } catch (err) {
