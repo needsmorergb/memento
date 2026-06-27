@@ -5,7 +5,9 @@ import React from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -35,6 +37,26 @@ function tierColor(tier: string | undefined, colors: ReturnType<typeof useColors
   return colors.mutedForeground;
 }
 
+interface PriceRow {
+  price_id: string;
+  product_id: string;
+  product_name: string;
+  unit_amount: number;
+  currency: string;
+  recurring: { interval: string; interval_count?: number } | null;
+  product_metadata: Record<string, string> | null;
+}
+
+function formatAmount(unitAmount: number, currency: string): string {
+  const amount = unitAmount / 100;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
 export default function SubscriptionScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -51,6 +73,11 @@ export default function SubscriptionScreen() {
   const [upgradeLoading, setUpgradeLoading] = React.useState(false);
   const [portalLoading, setPortalLoading] = React.useState(false);
 
+  const [showPlanPicker, setShowPlanPicker] = React.useState(false);
+  const [prices, setPrices] = React.useState<PriceRow[]>([]);
+  const [pricesLoading, setPricesLoading] = React.useState(false);
+  const [selectedInterval, setSelectedInterval] = React.useState<"monthly" | "annual">("monthly");
+
   const { data: mySub, isLoading: subLoading } = useGetMySubscription({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     query: { queryKey: getGetMySubscriptionQueryKey(), enabled: !!isSignedIn } as any,
@@ -62,6 +89,35 @@ export default function SubscriptionScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
+
+  const fetchPrices = React.useCallback(async () => {
+    setPricesLoading(true);
+    try {
+      const baseUrl = DOMAIN ? `https://${DOMAIN}` : "";
+      const res = await fetch(`${baseUrl}/api/billing/prices`);
+      if (res.ok) {
+        const data = await res.json() as { prices: PriceRow[] };
+        const proPrices = (data.prices ?? []).filter(
+          (p) => p.product_metadata?.tier === "pro"
+        );
+        setPrices(proPrices);
+      }
+    } catch {
+      // silently fall back — user can still proceed with defaults
+    } finally {
+      setPricesLoading(false);
+    }
+  }, []);
+
+  const monthlyPrice = prices.find((p) => p.recurring?.interval === "month");
+  const annualPrice = prices.find((p) => p.recurring?.interval === "year");
+
+  const annualSavingsPct = React.useMemo(() => {
+    if (!monthlyPrice || !annualPrice) return null;
+    const monthlyTotal = monthlyPrice.unit_amount * 12;
+    const saving = Math.round((1 - annualPrice.unit_amount / monthlyTotal) * 100);
+    return saving > 0 ? saving : null;
+  }, [monthlyPrice, annualPrice]);
 
   const handleClerkSignIn = async () => {
     if (!clerk.client) {
@@ -94,11 +150,18 @@ export default function SubscriptionScreen() {
     }
   };
 
-  const handleUpgrade = async () => {
+  const openPlanPicker = () => {
     if (!isSignedIn) {
       setShowSignInForm(true);
       return;
     }
+    setSelectedInterval("monthly");
+    setShowPlanPicker(true);
+    fetchPrices();
+  };
+
+  const handleUpgrade = async () => {
+    setShowPlanPicker(false);
     setUpgradeLoading(true);
     try {
       const token = await getToken();
@@ -109,7 +172,7 @@ export default function SubscriptionScreen() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token ?? ""}`,
         },
-        body: JSON.stringify({ plan: "pro", interval: "monthly" }),
+        body: JSON.stringify({ plan: "pro", interval: selectedInterval }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -459,7 +522,7 @@ export default function SubscriptionScreen() {
                         opacity: upgradeLoading ? 0.6 : 1,
                       },
                     ]}
-                    onPress={handleUpgrade}
+                    onPress={openPlanPicker}
                     disabled={upgradeLoading}
                     activeOpacity={0.8}
                   >
@@ -522,6 +585,345 @@ export default function SubscriptionScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Plan Picker Modal */}
+      <Modal
+        visible={showPlanPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPlanPicker(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowPlanPicker(false)}
+        >
+          <Pressable
+            style={[
+              styles.sheet,
+              {
+                backgroundColor: colors.card,
+                paddingBottom: botPad + 16,
+                borderRadius: colors.radius * 2,
+              },
+            ]}
+            onPress={() => {}}
+          >
+            <View style={styles.sheetHandle} />
+
+            <Text
+              style={[
+                styles.sheetTitle,
+                { color: colors.foreground, fontFamily: "Outfit_700Bold" },
+              ]}
+            >
+              Choose your plan
+            </Text>
+            <Text
+              style={[
+                styles.sheetSubtitle,
+                { color: colors.mutedForeground, fontFamily: "Outfit_400Regular" },
+              ]}
+            >
+              Save money with annual billing
+            </Text>
+
+            {pricesLoading ? (
+              <ActivityIndicator
+                color={colors.primary}
+                style={{ marginVertical: 24 }}
+              />
+            ) : (
+              <View style={styles.planOptions}>
+                {/* Monthly option */}
+                <TouchableOpacity
+                  style={[
+                    styles.planOption,
+                    {
+                      borderColor:
+                        selectedInterval === "monthly"
+                          ? colors.primary
+                          : colors.border,
+                      backgroundColor:
+                        selectedInterval === "monthly"
+                          ? colors.primary + "10"
+                          : colors.background,
+                      borderRadius: colors.radius,
+                    },
+                  ]}
+                  onPress={() => setSelectedInterval("monthly")}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.planOptionLeft}>
+                    <View
+                      style={[
+                        styles.radio,
+                        {
+                          borderColor:
+                            selectedInterval === "monthly"
+                              ? colors.primary
+                              : colors.border,
+                        },
+                      ]}
+                    >
+                      {selectedInterval === "monthly" && (
+                        <View
+                          style={[
+                            styles.radioDot,
+                            { backgroundColor: colors.primary },
+                          ]}
+                        />
+                      )}
+                    </View>
+                    <View>
+                      <Text
+                        style={[
+                          styles.planName,
+                          {
+                            color: colors.foreground,
+                            fontFamily: "Outfit_600SemiBold",
+                          },
+                        ]}
+                      >
+                        Monthly
+                      </Text>
+                      <Text
+                        style={[
+                          styles.planBilling,
+                          {
+                            color: colors.mutedForeground,
+                            fontFamily: "Outfit_400Regular",
+                          },
+                        ]}
+                      >
+                        Billed every month
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.planOptionRight}>
+                    {monthlyPrice ? (
+                      <Text
+                        style={[
+                          styles.planPrice,
+                          {
+                            color: colors.foreground,
+                            fontFamily: "Outfit_700Bold",
+                          },
+                        ]}
+                      >
+                        {formatAmount(monthlyPrice.unit_amount, monthlyPrice.currency)}
+                        <Text
+                          style={[
+                            styles.planPricePer,
+                            {
+                              color: colors.mutedForeground,
+                              fontFamily: "Outfit_400Regular",
+                            },
+                          ]}
+                        >
+                          /mo
+                        </Text>
+                      </Text>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.planPrice,
+                          {
+                            color: colors.mutedForeground,
+                            fontFamily: "Outfit_400Regular",
+                          },
+                        ]}
+                      >
+                        —
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+
+                {/* Annual option */}
+                <TouchableOpacity
+                  style={[
+                    styles.planOption,
+                    {
+                      borderColor:
+                        selectedInterval === "annual"
+                          ? colors.primary
+                          : colors.border,
+                      backgroundColor:
+                        selectedInterval === "annual"
+                          ? colors.primary + "10"
+                          : colors.background,
+                      borderRadius: colors.radius,
+                    },
+                  ]}
+                  onPress={() => setSelectedInterval("annual")}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.planOptionLeft}>
+                    <View
+                      style={[
+                        styles.radio,
+                        {
+                          borderColor:
+                            selectedInterval === "annual"
+                              ? colors.primary
+                              : colors.border,
+                        },
+                      ]}
+                    >
+                      {selectedInterval === "annual" && (
+                        <View
+                          style={[
+                            styles.radioDot,
+                            { backgroundColor: colors.primary },
+                          ]}
+                        />
+                      )}
+                    </View>
+                    <View>
+                      <View style={styles.planNameRow}>
+                        <Text
+                          style={[
+                            styles.planName,
+                            {
+                              color: colors.foreground,
+                              fontFamily: "Outfit_600SemiBold",
+                            },
+                          ]}
+                        >
+                          Annual
+                        </Text>
+                        {annualSavingsPct !== null && (
+                          <View
+                            style={[
+                              styles.savingsBadge,
+                              { backgroundColor: "#dcfce7" },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.savingsText,
+                                { fontFamily: "Outfit_600SemiBold" },
+                              ]}
+                            >
+                              Save {annualSavingsPct}%
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.planBilling,
+                          {
+                            color: colors.mutedForeground,
+                            fontFamily: "Outfit_400Regular",
+                          },
+                        ]}
+                      >
+                        Billed once per year
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.planOptionRight}>
+                    {annualPrice ? (
+                      <>
+                        <Text
+                          style={[
+                            styles.planPrice,
+                            {
+                              color: colors.foreground,
+                              fontFamily: "Outfit_700Bold",
+                            },
+                          ]}
+                        >
+                          {formatAmount(
+                            Math.round(annualPrice.unit_amount / 12),
+                            annualPrice.currency
+                          )}
+                          <Text
+                            style={[
+                              styles.planPricePer,
+                              {
+                                color: colors.mutedForeground,
+                                fontFamily: "Outfit_400Regular",
+                              },
+                            ]}
+                          >
+                            /mo
+                          </Text>
+                        </Text>
+                        <Text
+                          style={[
+                            styles.planPriceTotal,
+                            {
+                              color: colors.mutedForeground,
+                              fontFamily: "Outfit_400Regular",
+                            },
+                          ]}
+                        >
+                          {formatAmount(annualPrice.unit_amount, annualPrice.currency)}/yr
+                        </Text>
+                      </>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.planPrice,
+                          {
+                            color: colors.mutedForeground,
+                            fontFamily: "Outfit_400Regular",
+                          },
+                        ]}
+                      >
+                        —
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.continueBtn,
+                {
+                  backgroundColor: colors.primary,
+                  borderRadius: colors.radius,
+                  marginHorizontal: 20,
+                  marginTop: 20,
+                  opacity: pricesLoading ? 0.6 : 1,
+                },
+              ]}
+              onPress={handleUpgrade}
+              disabled={pricesLoading}
+              activeOpacity={0.8}
+            >
+              <Feather name="zap" size={16} color="#fff" />
+              <Text
+                style={[styles.continueBtnText, { fontFamily: "Outfit_600SemiBold" }]}
+              >
+                Continue with {selectedInterval === "annual" ? "Annual" : "Monthly"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => setShowPlanPicker(false)}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.cancelBtnText,
+                  {
+                    color: colors.mutedForeground,
+                    fontFamily: "Outfit_400Regular",
+                  },
+                ]}
+              >
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -634,5 +1036,116 @@ const styles = StyleSheet.create({
   actionBtnText: {
     color: "#fff",
     fontSize: 15,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    paddingTop: 12,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#d1d5db",
+    alignSelf: "center",
+    marginBottom: 20,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  sheetSubtitle: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  planOptions: {
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  planOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    borderWidth: 2,
+  },
+  planOptionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  planOptionRight: {
+    alignItems: "flex-end",
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  planNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  planName: {
+    fontSize: 15,
+  },
+  planBilling: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  savingsBadge: {
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  savingsText: {
+    fontSize: 11,
+    color: "#15803d",
+  },
+  planPrice: {
+    fontSize: 16,
+  },
+  planPricePer: {
+    fontSize: 12,
+  },
+  planPriceTotal: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  continueBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 14,
+  },
+  continueBtnText: {
+    color: "#fff",
+    fontSize: 15,
+  },
+  cancelBtn: {
+    alignItems: "center",
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  cancelBtnText: {
+    fontSize: 14,
   },
 });
