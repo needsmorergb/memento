@@ -20,6 +20,7 @@ import {
   useEndEvent,
   useGetEventByToken,
   useGetEventVideoStatusByToken,
+  useListEventMedia,
 } from "@workspace/api-client-react";
 
 function InfoRow({
@@ -66,6 +67,7 @@ export default function EventScreen() {
   const {
     eventId,
     shareToken,
+    guestToken,
     guestName,
     eventTitle,
     eventStatus,
@@ -76,6 +78,23 @@ export default function EventScreen() {
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
+
+  const { data: mediaData } = useListEventMedia(eventId ?? "", {
+    request: { headers: { "X-Guest-Token": guestToken ?? "" } },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: { enabled: !!eventId && isHost, refetchInterval: 20000 } as any,
+  });
+
+  const guestRoster = React.useMemo(() => {
+    if (!mediaData?.media) return [];
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const item of mediaData.media) {
+      const name = item.uploaderDisplayName ?? "Guest";
+      if (!seen.has(name)) { seen.add(name); list.push(name); }
+    }
+    return list;
+  }, [mediaData]);
 
   const { data: eventData, isLoading: eventLoading } = useGetEventByToken(
     shareToken ?? "",
@@ -401,6 +420,80 @@ export default function EventScreen() {
           </View>
         )}
 
+        {isHost && guestRoster.length > 0 && (
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.infoRow,
+                { borderBottomColor: colors.border },
+              ]}
+            >
+              <View
+                style={[styles.infoIconWrap, { backgroundColor: colors.muted }]}
+              >
+                <Feather name="users" size={16} color={colors.primary} />
+              </View>
+              <Text
+                style={[
+                  styles.infoValue,
+                  {
+                    color: colors.foreground,
+                    fontFamily: "Outfit_600SemiBold",
+                  },
+                ]}
+              >
+                Contributors ({guestRoster.length})
+              </Text>
+            </View>
+            {guestRoster.map((name, i) => (
+              <View
+                key={name}
+                style={[
+                  styles.infoRow,
+                  i === guestRoster.length - 1 && { borderBottomWidth: 0 },
+                  { borderBottomColor: colors.border },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.guestAvatar,
+                    { backgroundColor: colors.primary + "22" },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.guestAvatarText,
+                      { color: colors.primary, fontFamily: "Outfit_600SemiBold" },
+                    ]}
+                  >
+                    {name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.infoValue,
+                    {
+                      color: colors.foreground,
+                      fontFamily: "Outfit_400Regular",
+                    },
+                  ]}
+                >
+                  {name}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         {isHost && eventStatus !== "ended" && (
           <View style={styles.hostSection}>
             <Text
@@ -567,4 +660,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   leaveBtnText: { fontSize: 15 },
+  guestAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  guestAvatarText: { fontSize: 14 },
 });

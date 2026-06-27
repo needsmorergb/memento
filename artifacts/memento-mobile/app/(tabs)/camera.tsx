@@ -66,6 +66,8 @@ export default function CameraScreen() {
 
   const cameraRef = useRef<CameraView>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartRef = useRef<number | null>(null);
+  const voiceStartRef = useRef<number | null>(null);
 
   const [camPerm, requestCamPerm] = useCameraPermissions();
   const [micPerm, requestMicPerm] = useMicrophonePermissions();
@@ -173,8 +175,13 @@ export default function CameraScreen() {
     try {
       setIsRecordingVideo(true);
       startTimer(setVideoTimer);
+      recordingStartRef.current = Date.now();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const video = await cameraRef.current.recordAsync({ maxDuration: 120 });
+      const duration = recordingStartRef.current
+        ? Math.round((Date.now() - recordingStartRef.current) / 1000)
+        : undefined;
+      recordingStartRef.current = null;
       stopTimer();
       setIsRecordingVideo(false);
       setVideoTimer(0);
@@ -185,10 +192,11 @@ export default function CameraScreen() {
           "video/mp4",
           "video",
           undefined,
-          videoTimer
+          duration
         );
       }
     } catch {
+      recordingStartRef.current = null;
       stopTimer();
       setIsRecordingVideo(false);
       setVideoTimer(0);
@@ -213,6 +221,7 @@ export default function CameraScreen() {
     const rec = new Audio.Recording();
     await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
     await rec.startAsync();
+    voiceStartRef.current = Date.now();
     setVoiceRecording(rec);
     startTimer(setVoiceTimer);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -220,7 +229,10 @@ export default function CameraScreen() {
 
   const handleStopVoice = async () => {
     if (!voiceRecording) return;
-    const dur = voiceTimer;
+    const dur = voiceStartRef.current
+      ? Math.round((Date.now() - voiceStartRef.current) / 1000)
+      : undefined;
+    voiceStartRef.current = null;
     stopTimer();
     await voiceRecording.stopAndUnloadAsync();
     const uri = voiceRecording.getURI();
@@ -228,7 +240,7 @@ export default function CameraScreen() {
     setVoiceTimer(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (!uri) return;
-    await doUpload(uri, `voice_${Date.now()}.m4a`, "audio/m4a", "voice_note", undefined, dur);
+    await doUpload(uri, `voice_${Date.now()}.m4a`, "audio/m4a", "voice_note", undefined, dur ?? 0);
   };
 
   const needsCamPerm = mode !== "voice" && (!camPerm || !camPerm.granted);
@@ -416,9 +428,13 @@ export default function CameraScreen() {
           <TouchableOpacity
             style={[
               styles.shutterBtn,
-              { opacity: isUploading || eventEnded || needsCamPerm ? 0.4 : 1 },
+              {
+                opacity: isUploading || eventEnded || needsCamPerm ? 0.4 : 1,
+                borderColor: isRecordingVideo ? colors.destructive : "#fff",
+              },
             ]}
-            onPress={isRecordingVideo ? handleStopVideo : handleStartVideo}
+            onPressIn={!isRecordingVideo ? handleStartVideo : undefined}
+            onPressOut={isRecordingVideo ? handleStopVideo : undefined}
             disabled={isUploading || eventEnded || needsCamPerm}
             activeOpacity={0.8}
           >
@@ -449,7 +465,8 @@ export default function CameraScreen() {
                   opacity: isUploading || eventEnded ? 0.4 : 1,
                 },
               ]}
-              onPress={voiceRecording ? handleStopVoice : handleStartVoice}
+              onPressIn={!voiceRecording ? handleStartVoice : undefined}
+              onPressOut={voiceRecording ? handleStopVoice : undefined}
               disabled={isUploading || eventEnded}
               activeOpacity={0.8}
             >

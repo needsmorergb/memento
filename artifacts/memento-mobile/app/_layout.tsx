@@ -90,16 +90,16 @@ function DeepLinkHandler() {
           string,
           unknown
         >;
-        if (data?.type === "video_ready") {
-          router.push("/(tabs)/event");
-        } else if (data?.videoUrl && typeof data.videoUrl === "string") {
+        if (data?.videoUrl && typeof data.videoUrl === "string") {
           router.push({
             pathname: "/video",
             params: {
               url: data.videoUrl as string,
-              title: (data.eventTitle as string) ?? "Event Video",
+              title: (data.eventTitle as string) ?? "Highlight Video",
             },
           });
+        } else {
+          router.push("/(tabs)/event");
         }
       }
     );
