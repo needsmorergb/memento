@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { redirectToCheckout, redirectToPortal } from "@/lib/billing";
+import { PlanPickerDialog } from "@/components/PlanPickerDialog";
 
 const statusConfig = {
   upcoming: { label: "Upcoming", icon: Clock, className: "bg-blue-100 text-blue-700" },
@@ -37,6 +38,7 @@ export default function HostDashboard() {
   const [description, setDescription] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [showPlanPicker, setShowPlanPicker] = useState(false);
 
   // Handle return from Stripe checkout or auto-trigger upgrade
   useEffect(() => {
@@ -135,7 +137,7 @@ export default function HostDashboard() {
             <Button
               size="sm"
               className="gap-1.5"
-              onClick={() => redirectToCheckout("pro").catch(() => toast({ title: "Billing error", description: "Could not open checkout. Please try again.", variant: "destructive" }))}
+              onClick={() => setShowPlanPicker(true)}
               data-testid="button-upgrade-pro"
             >
               <Star className="w-3.5 h-3.5" />
@@ -222,6 +224,18 @@ export default function HostDashboard() {
           </div>
         )}
       </main>
+
+      {/* Plan Picker Dialog */}
+      <PlanPickerDialog
+        open={showPlanPicker}
+        onOpenChange={setShowPlanPicker}
+        onConfirm={async (interval) => {
+          setShowPlanPicker(false);
+          await redirectToCheckout("pro", interval).catch(() =>
+            toast({ title: "Billing error", description: "Could not open checkout. Please try again.", variant: "destructive" })
+          );
+        }}
+      />
 
       {/* Create Event Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
