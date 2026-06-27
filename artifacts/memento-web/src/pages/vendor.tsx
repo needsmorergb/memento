@@ -8,7 +8,7 @@ import {
   getGetMeQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Copy, Share2, CheckCircle, Store } from "lucide-react";
+import { ArrowLeft, Copy, CheckCircle, Store, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +32,8 @@ export default function VendorPage() {
 
   const registerVendor = useRegisterVendor();
   const [businessName, setBusinessName] = useState("");
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -42,7 +44,7 @@ export default function VendorPage() {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetVendorReferralCodeQueryKey() });
-          toast({ title: "Vendor account created" });
+          toast({ title: "Vendor account created!" });
         },
         onError: () => toast({ title: "Registration failed", variant: "destructive" }),
       }
@@ -52,15 +54,26 @@ export default function VendorPage() {
   function copyCode() {
     if (!codeInfo?.code) return;
     navigator.clipboard.writeText(codeInfo.code).then(() => {
+      setCopiedCode(true);
       toast({ title: "Code copied" });
+      setTimeout(() => setCopiedCode(false), 2000);
     });
   }
 
-  const isLoading = meLoading;
+  function copyLink() {
+    if (!codeInfo?.joinUrl) return;
+    navigator.clipboard.writeText(codeInfo.joinUrl).then(() => {
+      setCopiedLink(true);
+      toast({ title: "Join link copied" });
+      setTimeout(() => setCopiedLink(false), 2000);
+    });
+  }
+
+  const capSeconds = codeInfo?.videoDurationCapSeconds ?? 180;
+  const capLabel = `${Math.floor(capSeconds / 60)}:${String(capSeconds % 60).padStart(2, "0")}`;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="max-w-3xl mx-auto px-6 h-16 flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => setLocation("/host")} data-testid="button-back">
@@ -71,7 +84,7 @@ export default function VendorPage() {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-10">
-        {isLoading ? (
+        {meLoading ? (
           <div className="space-y-6">
             <Skeleton className="h-48 rounded-2xl" />
             <Skeleton className="h-32 rounded-2xl" />
@@ -85,7 +98,7 @@ export default function VendorPage() {
               </div>
               <h2 className="font-serif text-3xl font-bold mb-3">Become a vendor</h2>
               <p className="text-muted-foreground max-w-md mx-auto">
-                As a photographer, wedding planner, or event vendor, get your own referral code to give clients extended video edits.
+                As a photographer, wedding planner, or event vendor, get your own referral link to give clients extended video edits.
               </p>
             </div>
 
@@ -96,10 +109,10 @@ export default function VendorPage() {
               <CardContent>
                 <ul className="space-y-3">
                   {[
-                    "Your own referral code to distribute to clients",
-                    "Clients using your code get 3-minute video edits (instead of 60s)",
-                    "Vendor dashboard to track code usage",
-                    "Priority video processing",
+                    "Your own referral code and shareable join link",
+                    "Clients using your link get extended video edits (default 3 minutes vs 60 seconds free)",
+                    "Your branding shown on the guest join page",
+                    "Priority video processing for your clients",
                   ].map((benefit) => (
                     <li key={benefit} className="flex items-start gap-2.5 text-sm">
                       <CheckCircle className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
@@ -113,7 +126,7 @@ export default function VendorPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="font-serif text-lg">Register your business</CardTitle>
-                <CardDescription>Enter your business name to get your referral code</CardDescription>
+                <CardDescription>Enter your business name to get your referral link</CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleRegister} className="space-y-4">
@@ -149,74 +162,101 @@ export default function VendorPage() {
             </div>
 
             {codeLoading ? (
-              <Skeleton className="h-40 rounded-2xl" />
+              <Skeleton className="h-48 rounded-2xl" />
             ) : codeInfo ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="font-serif text-lg">Your referral code</CardTitle>
-                  <CardDescription>
-                    Share this code with clients. When they use it to join an event, they get extended video edits.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="flex items-center gap-3" data-testid="card-referral-code">
-                    <div className="flex-1 bg-muted rounded-xl px-5 py-4 text-center">
-                      <span className="text-3xl font-bold font-mono tracking-widest text-primary" data-testid="text-referral-code">
-                        {codeInfo.code}
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-2">
+              <>
+                {/* Referral code */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="font-serif text-lg">Your referral code</CardTitle>
+                    <CardDescription>
+                      Guests who use this code (or your join link) get an extended video edit — up to {capLabel}.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <div className="flex items-center gap-3" data-testid="card-referral-code">
+                      <div className="flex-1 bg-muted rounded-xl px-5 py-4 text-center">
+                        <span className="text-3xl font-bold font-mono tracking-widest text-primary" data-testid="text-referral-code">
+                          {codeInfo.code}
+                        </span>
+                      </div>
                       <Button variant="outline" size="icon" onClick={copyCode} data-testid="button-copy-code">
-                        <Copy className="w-4 h-4" />
+                        {copiedCode ? <CheckCircle className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
                       </Button>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
-                      <div className="text-2xl font-bold text-primary mb-1" data-testid="text-video-cap">
-                        {codeInfo.videoDurationCapSeconds != null
-                          ? `${Math.floor(codeInfo.videoDurationCapSeconds / 60)}:${String(codeInfo.videoDurationCapSeconds % 60).padStart(2, "0")}`
-                          : "3:00"}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
+                        <div className="text-2xl font-bold text-primary mb-1" data-testid="text-video-cap">
+                          {capLabel}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Video cap for clients</div>
                       </div>
-                      <div className="text-xs text-muted-foreground">Video cap for clients</div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
-                      <div className="text-2xl font-bold mb-1" data-testid="text-code-status">
-                        Active
+                      <div className="rounded-xl border border-border bg-muted/30 p-4 text-center">
+                        <div className="text-2xl font-bold mb-1" data-testid="text-code-status">Active</div>
+                        <div className="text-xs text-muted-foreground">Code status</div>
                       </div>
-                      <div className="text-xs text-muted-foreground">Code status</div>
                     </div>
-                  </div>
 
-                  {codeInfo.benefitDescription && (
-                    <p className="text-sm text-muted-foreground border-t border-border pt-4">
-                      {codeInfo.benefitDescription}
+                    {codeInfo.benefitDescription && (
+                      <p className="text-sm text-muted-foreground border-t border-border pt-4">
+                        {codeInfo.benefitDescription}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Join link */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="font-serif text-lg">Your vendor join link</CardTitle>
+                    <CardDescription>
+                      Share this link with clients. It pre-fills your code automatically — guests just enter their name and join.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3" data-testid="card-join-link">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-muted rounded-lg px-3 py-2.5 text-sm font-mono text-muted-foreground truncate" data-testid="text-join-url">
+                        {codeInfo.joinUrl}
+                      </div>
+                      <Button variant="outline" size="icon" onClick={copyLink} data-testid="button-copy-link">
+                        {copiedLink ? <CheckCircle className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                      </Button>
+                      <a href={codeInfo.joinUrl} target="_blank" rel="noopener noreferrer" data-testid="link-open-join-url">
+                        <Button variant="outline" size="icon">
+                          <ExternalLink className="w-4 h-4" />
+                        </Button>
+                      </a>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      This link contains your code. Guests who open it will automatically have your referral applied.
                     </p>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                {/* How to guide */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="font-serif text-lg">How to use your link</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ol className="space-y-3 text-sm text-muted-foreground list-decimal list-inside">
+                      <li>Share your join link (above) with your client before or at the event</li>
+                      <li>Guests who open your link automatically get your vendor code applied</li>
+                      <li>Their same-day edit will be up to {capLabel} long</li>
+                      <li>Your branding appears on the join page so guests know you arranged it</li>
+                    </ol>
+                  </CardContent>
+                </Card>
+              </>
             ) : (
               <Card>
                 <CardContent className="text-center py-10 text-muted-foreground">
-                  <Share2 className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p>Your referral code is being generated</p>
+                  <Store className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p>Your referral code is being generated...</p>
                 </CardContent>
               </Card>
             )}
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="font-serif text-lg">How to use your code</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ol className="space-y-3 text-sm text-muted-foreground list-decimal list-inside">
-                  <li>Share your code <strong className="text-foreground">{codeInfo?.code ?? "..."}</strong> with your client</li>
-                  <li>When they join the event, they enter your code in the join form</li>
-                  <li>Their same-day edit video will be up to {codeInfo?.videoDurationCapSeconds != null ? `${Math.floor(codeInfo.videoDurationCapSeconds / 60)} minutes` : "3 minutes"} long</li>
-                </ol>
-              </CardContent>
-            </Card>
           </div>
         )}
       </main>

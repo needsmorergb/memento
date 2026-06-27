@@ -1,9 +1,11 @@
+import { useState, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import {
   useGetEventByToken,
   useGetEventVideoStatus,
   getGetEventVideoStatusQueryKey,
   getGetEventByTokenQueryKey,
+  type PublicEventInfo,
 } from "@workspace/api-client-react";
 import { Film, Loader2, AlertCircle, Clock, ArrowLeft, Download, Smartphone, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,12 +28,7 @@ function AppDownloadBanner() {
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          <a
-            href={APP_STORE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-testid="link-app-store"
-          >
+          <a href={APP_STORE_URL} target="_blank" rel="noopener noreferrer" data-testid="link-app-store">
             <Button variant="outline" size="sm" className="gap-1.5 text-xs">
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
@@ -39,12 +36,7 @@ function AppDownloadBanner() {
               App Store
             </Button>
           </a>
-          <a
-            href={PLAY_STORE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-testid="link-play-store"
-          >
+          <a href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" data-testid="link-play-store">
             <Button variant="outline" size="sm" className="gap-1.5 text-xs">
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M3 20.5v-17c0-.83 1-.97 1.4-.5l14 8.5c.4.23.4.77 0 1L4.4 21c-.4.47-1.4.33-1.4-.5zm2-13.5v11l9.3-5.5L5 7z"/>
@@ -58,10 +50,8 @@ function AppDownloadBanner() {
   );
 }
 
-function UpgradeBanner({ tier }: { tier?: string }) {
-  const isFreeTier = !tier || tier === "free";
-  if (!isFreeTier) return null;
-
+function UpgradeBanner({ tier }: { tier?: string | null }) {
+  if (tier && tier !== "free") return null;
   return (
     <Card className="mt-4 border-amber-200 bg-amber-50" data-testid="card-upgrade-prompt">
       <CardContent className="py-5 flex flex-col sm:flex-row items-center gap-4">
@@ -75,67 +65,44 @@ function UpgradeBanner({ tier }: { tier?: string }) {
           </p>
         </div>
         <a href="/#pricing" data-testid="link-upgrade">
-          <Button size="sm" className="flex-shrink-0">
-            Upgrade to Pro
-          </Button>
+          <Button size="sm" className="flex-shrink-0">Upgrade to Pro</Button>
         </a>
       </CardContent>
     </Card>
   );
 }
 
-export default function VideoPlayback() {
-  const params = useParams<{ shareToken: string }>();
-  const shareToken = params.shareToken;
-  const [, setLocation] = useLocation();
+interface VideoContentProps {
+  eventInfo: PublicEventInfo;
+  guestToken: string | null;
+  shareToken: string;
+  onBack: () => void;
+}
 
-  const { data: eventInfo, isLoading: eventLoading } = useGetEventByToken(shareToken, {
-    query: { queryKey: getGetEventByTokenQueryKey(shareToken) },
-  });
+function VideoContent({ eventInfo, guestToken, shareToken, onBack }: VideoContentProps) {
+  const requestOptions = guestToken
+    ? { headers: { "X-Guest-Token": guestToken } }
+    : undefined;
 
-  const { data: videoStatus, isLoading: videoLoading } = useGetEventVideoStatus(eventInfo?.id ?? "", {
+  const { data: videoStatus, isLoading } = useGetEventVideoStatus(eventInfo.id, {
+    request: requestOptions,
     query: {
-      enabled: !!eventInfo?.id,
-      queryKey: getGetEventVideoStatusQueryKey(eventInfo?.id ?? ""),
+      queryKey: getGetEventVideoStatusQueryKey(eventInfo.id),
       refetchInterval: (query) => {
-        const status = query.state.data?.status;
-        return status === "pending" || status === "processing" ? 3000 : false;
+        const s = query.state.data?.status;
+        return s === "pending" || s === "processing" ? 3000 : false;
       },
     },
   });
-
-  if (eventLoading || videoLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto mb-3" />
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!eventInfo) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-6" data-testid="error-event-not-found">
-        <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-          <h2 className="font-serif text-2xl font-bold mb-2">Event not found</h2>
-          <p className="text-muted-foreground">This video link may have expired.</p>
-        </div>
-      </div>
-    );
-  }
 
   const capSeconds = videoStatus?.durationCapSeconds ?? 60;
   const capLabel = `${Math.floor(capSeconds / 60)}:${String(capSeconds % 60).padStart(2, "0")}`;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b border-border">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => setLocation(`/event/${shareToken}`)} data-testid="button-back">
+          <Button variant="ghost" size="icon" onClick={onBack} data-testid="button-back">
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <div className="flex-1">
@@ -149,26 +116,24 @@ export default function VideoPlayback() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
-        {!videoStatus ? (
+        {isLoading ? (
+          <div className="text-center py-20">
+            <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto mb-3" />
+            <p className="text-muted-foreground">Loading video...</p>
+          </div>
+        ) : !videoStatus ? (
           <>
             <div className="text-center py-20 rounded-2xl border border-dashed border-border" data-testid="no-video">
               <Film className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-40" />
               <h2 className="font-serif text-2xl font-bold mb-2">No video yet</h2>
-              <p className="text-muted-foreground">
-                The same-day edit is compiled after the event ends.
-              </p>
+              <p className="text-muted-foreground">The same-day edit is compiled after the event ends.</p>
             </div>
             <AppDownloadBanner />
           </>
         ) : videoStatus.status === "completed" && videoStatus.videoUrl ? (
           <div data-testid="video-complete">
             <div className="rounded-2xl overflow-hidden bg-black mb-4 shadow-xl">
-              <video
-                controls
-                autoPlay
-                className="w-full"
-                data-testid="video-player"
-              >
+              <video controls autoPlay className="w-full" data-testid="video-player">
                 <source src={videoStatus.videoUrl} />
                 Your browser doesn't support video.
               </video>
@@ -227,5 +192,56 @@ export default function VideoPlayback() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function VideoPlayback() {
+  const params = useParams<{ shareToken: string }>();
+  const shareToken = params.shareToken;
+  const [, setLocation] = useLocation();
+
+  const { data: eventInfo, isLoading } = useGetEventByToken(shareToken, {
+    query: { queryKey: getGetEventByTokenQueryKey(shareToken) },
+  });
+
+  const [guestToken, setGuestToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (eventInfo?.id) {
+      const stored = localStorage.getItem(`memento_guest_${eventInfo.id}`);
+      setGuestToken(stored);
+    }
+  }, [eventInfo?.id]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto mb-3" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!eventInfo) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-6" data-testid="error-event-not-found">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h2 className="font-serif text-2xl font-bold mb-2">Event not found</h2>
+          <p className="text-muted-foreground">This video link may have expired.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <VideoContent
+      eventInfo={eventInfo}
+      guestToken={guestToken}
+      shareToken={shareToken}
+      onBack={() => setLocation(`/event/${shareToken}`)}
+    />
   );
 }

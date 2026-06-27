@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams } from "wouter";
 import {
   useGetEventByToken,
@@ -12,11 +12,12 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Camera, Upload, Mic, Film, Users, Loader2, CheckCircle, Clock,
-  Radio, AlertCircle,
+  Radio, AlertCircle, Square, MicOff, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 
@@ -35,6 +36,172 @@ function detectMediaType(file: File): MediaType {
   if (file.type.startsWith("video/")) return "video";
   if (file.type.startsWith("audio/")) return "voice_note";
   return "photo";
+}
+
+function formatDuration(ms: number) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
+}
+
+interface VendorBannerProps {
+  code: string;
+}
+function VendorBanner({ code }: VendorBannerProps) {
+  return (
+    <Card className="mb-6 border-primary/20 bg-primary/5" data-testid="card-vendor-banner">
+      <CardContent className="py-4 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+          <Star className="w-4 h-4 text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold">Extended video edit unlocked</p>
+          <p className="text-xs text-muted-foreground">
+            Code <span className="font-mono font-bold">{code}</span> gives you a longer same-day edit, courtesy of your event vendor.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface UploadHelpers {
+  requestUploadUrl: ReturnType<typeof useRequestUploadUrl>;
+  confirmUpload: ReturnType<typeof useConfirmMediaUpload>;
+  eventId: string;
+}
+
+async function uploadFileAs(
+  file: File,
+  mediaType: MediaType,
+  helpers: UploadHelpers,
+  onInvalidate: () => void
+): Promise<void> {
+  const { requestUploadUrl, confirmUpload, eventId } = helpers;
+
+  const urlRes = await new Promise<{ uploadURL: string; objectPath: string }>((resolve, reject) => {
+    requestUploadUrl.mutate(
+      { data: { name: file.name, size: file.size, contentType: file.type } },
+      { onSuccess: resolve, onError: reject }
+    );
+  });
+
+  await fetch(urlRes.uploadURL, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": file.type },
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    confirmUpload.mutate(
+      {
+        eventId,
+        data: {
+          objectPath: urlRes.objectPath,
+          mediaType,
+          fileName: file.name,
+          fileSizeBytes: file.size,
+        },
+      },
+      { onSuccess: () => { onInvalidate(); resolve(); }, onError: reject }
+    );
+  });
+}
+
+interface VoiceRecorderProps {
+  onRecordingComplete: (blob: Blob, durationMs: number) => void;
+  disabled: boolean;
+}
+
+function VoiceRecorder({ onRecordingComplete, disabled }: VoiceRecorderProps) {
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const startTimeRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/mp4";
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const durationMs = Date.now() - startTimeRef.current;
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        stream.getTracks().forEach((t) => t.stop());
+        onRecordingComplete(blob, durationMs);
+      };
+
+      recorder.start(250);
+      recorderRef.current = recorder;
+      startTimeRef.current = Date.now();
+      setElapsed(0);
+      setRecording(true);
+      timerRef.current = setInterval(() => {
+        setElapsed(Date.now() - startTimeRef.current);
+      }, 500);
+    } catch {
+      setPermissionDenied(true);
+    }
+  }, [onRecordingComplete]);
+
+  const stopRecording = useCallback(() => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+  }, []);
+
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
+  if (permissionDenied) {
+    return (
+      <Button size="sm" variant="outline" disabled className="gap-1.5 text-xs" data-testid="button-mic-denied">
+        <MicOff className="w-4 h-4" />
+        Mic blocked
+      </Button>
+    );
+  }
+
+  if (recording) {
+    return (
+      <Button
+        size="sm"
+        variant="destructive"
+        className="gap-1.5 text-xs animate-pulse"
+        onClick={stopRecording}
+        data-testid="button-stop-recording"
+      >
+        <Square className="w-3 h-3 fill-current" />
+        {formatDuration(elapsed)}
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="gap-1.5 text-xs"
+      onClick={startRecording}
+      disabled={disabled}
+      data-testid="button-record-voice"
+    >
+      <Mic className="w-4 h-4" />
+      Voice note
+    </Button>
+  );
 }
 
 interface GuestFeedProps {
@@ -56,54 +223,27 @@ function GuestFeed({ eventId, guestToken }: GuestFeedProps) {
   });
 
   const guestHeaders = { headers: { "X-Guest-Token": guestToken } };
-
   const requestUploadUrl = useRequestUploadUrl({ request: guestHeaders });
   const confirmUpload = useConfirmMediaUpload({ request: guestHeaders });
 
   const items = data?.media ?? [];
 
+  const helpers: UploadHelpers = {
+    requestUploadUrl,
+    confirmUpload,
+    eventId,
+  };
+
+  function invalidateMedia() {
+    queryClient.invalidateQueries({ queryKey: getListEventMediaQueryKey(eventId) });
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setUploading(true);
     try {
-      const mediaType = detectMediaType(file);
-
-      const urlRes = await new Promise<{ uploadURL: string; objectPath: string }>((resolve, reject) => {
-        requestUploadUrl.mutate(
-          { data: { name: file.name, size: file.size, contentType: file.type } },
-          { onSuccess: resolve, onError: reject }
-        );
-      });
-
-      await fetch(urlRes.uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        confirmUpload.mutate(
-          {
-            eventId,
-            data: {
-              objectPath: urlRes.objectPath,
-              mediaType,
-              fileName: file.name,
-              fileSizeBytes: file.size,
-            },
-          },
-          {
-            onSuccess: () => {
-              queryClient.invalidateQueries({ queryKey: getListEventMediaQueryKey(eventId) });
-              resolve();
-            },
-            onError: reject,
-          }
-        );
-      });
-
+      await uploadFileAs(file, detectMediaType(file), helpers, invalidateMedia);
       toast({ title: "Uploaded!", description: "Your moment has been added to the feed." });
     } catch {
       toast({ title: "Upload failed", description: "Please try again.", variant: "destructive" });
@@ -113,10 +253,24 @@ function GuestFeed({ eventId, guestToken }: GuestFeedProps) {
     }
   }
 
+  async function handleVoiceRecording(blob: Blob, durationMs: number) {
+    setUploading(true);
+    const ext = blob.type.includes("webm") ? "webm" : "mp4";
+    const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type });
+    try {
+      await uploadFileAs(file, "voice_note", helpers, invalidateMedia);
+      toast({ title: `Voice note saved (${formatDuration(durationMs)})` });
+    } catch {
+      toast({ title: "Upload failed", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div>
       {/* Upload bar */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border px-4 py-3 flex items-center gap-2">
         <span className="text-sm text-muted-foreground flex-1">Share a moment</span>
         <input
           ref={fileInputRef}
@@ -126,16 +280,17 @@ function GuestFeed({ eventId, guestToken }: GuestFeedProps) {
           onChange={handleFileSelect}
           data-testid="input-file-upload"
         />
+        <VoiceRecorder onRecordingComplete={handleVoiceRecording} disabled={uploading} />
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="gap-1.5 text-xs"
           disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
           data-testid="button-upload-media"
         >
           {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-          {uploading ? "Uploading..." : "Add photo/video"}
+          {uploading ? "Uploading..." : "Photo/video"}
         </Button>
       </div>
 
@@ -218,15 +373,27 @@ export default function EventJoin() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [referralCode, setReferralCode] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("ref") ?? "";
+    const p = new URLSearchParams(window.location.search);
+    return (p.get("ref") ?? "").toUpperCase();
   });
+
+  const prefilledCode = (() => {
+    const p = new URLSearchParams(window.location.search);
+    return (p.get("ref") ?? "").toUpperCase();
+  })();
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
     if (!name || !eventInfo) return;
     joinEvent.mutate(
-      { data: { shareToken, displayName: name, email: email || undefined, referralCode: referralCode.trim() || undefined } },
+      {
+        data: {
+          shareToken,
+          displayName: name,
+          email: email || undefined,
+          referralCode: referralCode.trim() || undefined,
+        },
+      },
       {
         onSuccess: (res) => {
           const token = res.guest.guestToken ?? res.guest.id;
@@ -273,7 +440,10 @@ export default function EventJoin() {
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2 mb-1">
                 <h1 className="font-serif text-2xl font-bold">{eventInfo.title}</h1>
-                <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${cfg.className}`} data-testid="badge-event-status">
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${cfg.className}`}
+                  data-testid="badge-event-status"
+                >
                   <StatusIcon className="w-3 h-3" />
                   {cfg.label}
                 </span>
@@ -282,7 +452,9 @@ export default function EventJoin() {
                 <p className="text-muted-foreground text-sm mb-2">{eventInfo.description}</p>
               )}
               <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                {eventInfo.hostName && <span>Hosted by <strong className="text-foreground">{eventInfo.hostName}</strong></span>}
+                {eventInfo.hostName && (
+                  <span>Hosted by <strong className="text-foreground">{eventInfo.hostName}</strong></span>
+                )}
                 <span className="flex items-center gap-1">
                   <Users className="w-3.5 h-3.5" />
                   {eventInfo.guestCount} {eventInfo.guestCount === 1 ? "guest" : "guests"}
@@ -301,6 +473,7 @@ export default function EventJoin() {
         {!guestToken ? (
           /* Join form */
           <div className="px-6 py-10" data-testid="join-form">
+            {prefilledCode && <VendorBanner code={prefilledCode} />}
             <h2 className="font-serif text-2xl font-bold mb-2">Join {eventInfo.title}</h2>
             <p className="text-muted-foreground mb-6">
               Add your name to access the shared photo stream and contribute your own memories. No app download required.
