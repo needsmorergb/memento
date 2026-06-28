@@ -2,7 +2,7 @@ import { getUncachableStripeClient } from "./stripeClient.ts";
 
 async function seedProducts() {
   const stripe = await getUncachableStripeClient();
-  console.log("Seeding Stripe products for Memento...");
+  console.log("Seeding Stripe products for Momento...");
 
   // ── Pro Host Plan ──────────────────────────────────────────────────────────
 
@@ -16,7 +16,7 @@ async function seedProducts() {
     console.log(`✓ Pro Host product already exists: ${proProduct.id}`);
   } else {
     proProduct = await stripe.products.create({
-      name: "Memento Pro Host",
+      name: "Momento Pro Host",
       description:
         "Unlimited events, up to 5-minute same-day edit videos, and priority processing.",
       metadata: { tier: "pro" },
@@ -54,7 +54,7 @@ async function seedProducts() {
     );
   } else {
     const vendorProduct = await stripe.products.create({
-      name: "Memento Vendor",
+      name: "Momento Vendor",
       description:
         "Everything in Pro, plus vendor referral codes that give clients 3-minute edits.",
       metadata: { tier: "vendor" },

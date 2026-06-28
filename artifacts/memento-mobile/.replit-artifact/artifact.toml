@@ -1,6 +1,6 @@
 kind = "mobile"
 previewPath = "/mobile/"
-title = "Memento Mobile"
+title = "Momento Mobile"
 version = "1.0.0"
 id = "artifacts/memento-mobile"
 router = "expo-domain"

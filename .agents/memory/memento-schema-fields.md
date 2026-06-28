@@ -1,9 +1,9 @@
 ---
-name: Memento schema field name gotchas
+name: Momento schema field name gotchas
 description: Correct field names in API response schemas — easy to confuse with intuitive names
 ---
 
-# Memento Schema Field Name Gotchas
+# Momento Schema Field Name Gotchas
 
 ## MediaItem
 - `uploaderDisplayName` — NOT `uploaderName`

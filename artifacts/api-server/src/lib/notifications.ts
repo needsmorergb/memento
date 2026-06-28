@@ -66,7 +66,7 @@ export async function sendPushNotifications(
 
 async function sendEmail(opts: { to: string; subject: string; html: string }): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
-  const fromAddress = process.env.RESEND_FROM_EMAIL ?? "Memento <no-reply@memento.app>";
+  const fromAddress = process.env.RESEND_FROM_EMAIL ?? "Momento <no-reply@memento.app>";
 
   if (!apiKey) {
     logger.info(
@@ -227,7 +227,7 @@ function buildGuestEmailHtml(opts: {
 
     <!-- Footer -->
     <div style="padding:20px 40px;border-top:1px solid #2d2d2d;text-align:center;">
-      <p style="font-size:12px;color:#6b7280;margin:0;">Made with Memento — capture every moment</p>
+      <p style="font-size:12px;color:#6b7280;margin:0;">Made with Momento — capture every moment</p>
     </div>
   </div>
 </body>
@@ -336,7 +336,7 @@ function buildHostEmailHtml(opts: {
 
     <!-- Footer -->
     <div style="padding:20px 40px;border-top:1px solid #2d2d2d;text-align:center;">
-      <p style="font-size:12px;color:#6b7280;margin:0;">Made with Memento — capture every moment</p>
+      <p style="font-size:12px;color:#6b7280;margin:0;">Made with Momento — capture every moment</p>
     </div>
   </div>
 </body>

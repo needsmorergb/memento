@@ -14,7 +14,7 @@ export default function Landing() {
             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
               <Camera className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-serif text-xl font-bold tracking-tight">Memento</span>
+            <span className="font-serif text-xl font-bold tracking-tight">Momento</span>
           </div>
           <div className="flex items-center gap-3">
             <Button variant="ghost" onClick={() => setLocation("/sign-in")} data-testid="button-sign-in">
@@ -222,7 +222,7 @@ export default function Landing() {
             <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
               <Camera className="w-3 h-3 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-foreground">Memento</span>
+            <span className="font-semibold text-foreground">Momento</span>
           </div>
           <p>Memories made permanent.</p>
         </div>
