@@ -25,7 +25,7 @@ Detected from the codebase — both clients already share a warm Linen / Espress
 | Preset | `style: new-york`, `baseColor: neutral`, `cssVariables: true`, `rsc: false`, `tsx: true` (`artifacts/memento-web/components.json`) — tokens overridden by the project theme in `src/index.css`, NOT stock neutral |
 | Component library | Web: Radix UI via shadcn/ui (`@/components/ui/*`, ~50 primitives present). Mobile: no component library — hand-built React Native primitives styled via `StyleSheet` + `useColors()` |
 | Icon library | Web: `lucide-react`. Mobile: `@expo/vector-icons` (`Feather`) |
-| Font | Sans: **Outfit** (body/UI). Serif: **Playfair Display** (headings, web `font-serif`). Mono: Menlo. Mobile weights loaded as `Outfit_400Regular / _500Medium / _600SemiBold / _700Bold` |
+| Font | Sans: **Outfit** (body/UI). Serif: **Playfair Display** (headings, web `font-serif`). Mono: Menlo. Mobile loads `Outfit_400Regular / _600SemiBold / _700Bold` (the contract uses 400 + 600, with 700 reserved for the serif display heading only — see Typography) |
 | Video player | Web: native `<video controls>` pointed at the signed playback URL. Mobile: `expo-av` `Video` (`useNativeControls`, `ResizeMode.CONTAIN`) — already the pattern in `app/video.tsx` |
 | Polling | Reuse existing React Query video-status hooks. **Web host:** `useGetEventVideoStatus` (authed). **Mobile host:** must switch the host's review card to the authed `useGetEventVideoStatus` hook — `app/(tabs)/event.tsx` currently uses the public `useGetEventVideoStatusByToken`, which MUST NOT surface the review video before approval |
 
@@ -48,23 +48,25 @@ The codebase uses Tailwind's default 4px-based scale on web (`gap-3` = 12, `p-6`
 Exceptions:
 - Empty/processing state cards on web use `py-16`–`py-20` (64–80px) to center hero messaging — keep this for the "compiling" and "regenerating" full-card states.
 - Mobile touch targets: action buttons (`Approve`, `Regenerate`, `Watch`) keep a **minimum 46px height** (existing `watchBtn`/`signInBtn` convention), and the back/share icon bubbles are 36px — preserve these, do not shrink.
+- **Accepted brownfield tokens:** 12px (`gap-3`) and 80px (`py-20`) fall outside the canonical 8-point set but remain 4px-grid-aligned; they are inherited from the existing event-detail surface and are accepted as-is rather than refactored in this phase.
 
 ---
 
 ## Typography
 
-Web roles map to existing classes; mobile maps to existing `StyleSheet` font sizes + Outfit weights. Two weights dominate per surface (regular 400 + semibold 600), with bold (700) reserved for the largest serif headings.
+Web roles map to existing classes; mobile maps to existing `StyleSheet` font sizes + Outfit weights. The contract uses exactly **two weights**: regular **400** (body, label, meta) and semibold **600** (section headings, card titles, status verbs). The only exception is the single largest serif **display heading**, which retains Playfair **700** as a brand-required treatment — no other element on the surface uses 700, and 500 (medium) is not used at all.
 
 | Role | Web | Mobile | Weight | Line Height |
 |------|-----|--------|--------|-------------|
-| Display / hero heading | Playfair `font-serif text-2xl font-bold` (24px) | `eventTitle` 26px | 700 (serif) | 1.2–1.25 (web `tight`, mobile `lineHeight: 32`) |
+| Display / hero heading | Playfair `font-serif text-2xl font-bold` (24px) | `eventTitle` 26px | 700 (serif — sole brand exception) | 1.2–1.25 (web `tight`, mobile `lineHeight: 32`) |
 | Section heading | `font-semibold` ~16px (card `h3`) | `sectionLabel` 16px | 600 | 1.3 |
 | Body | `text-sm` (14px) / base 16px | `videoSub` / `infoValue` 15px | 400 | 1.5 (mobile `lineHeight: 18` on 13px sub-text) |
-| Label / meta | `text-xs` (12px) | `infoLabel` / `pillText` 12–13px | 500 (medium) | 1.4 |
+| Label / meta | `text-xs` (12px) | `infoLabel` / `pillText` 12–13px | 400 | 1.4 |
 
 Rules:
-- The card title for the review section is the existing pattern: `font-semibold` with a leading 16px icon (`Film` web / `Feather "film"` mobile) tinted `text-primary`.
-- Status verbs ("Ready for review", "Compiling…", "Regenerating…", "Approved & delivered", "Failed") use body weight 500/600, never the serif display face.
+- Two-weight rule: every element is **400** or **600**. The serif display heading at **700** is the single permitted exception. **500 (medium) is not used anywhere** on this surface.
+- The card title for the review section is the existing pattern: `font-semibold` (600) with a leading 16px icon (`Film` web / `Feather "film"` mobile) tinted `text-primary`.
+- Status verbs ("Ready for review", "Compiling…", "Regenerating…", "Approved & delivered", "Failed") use semibold weight **600**, never 700/500 and never the serif display face.
 - Do not introduce new font families or sizes beyond those listed — both clients already constrain to Outfit + Playfair.
 
 ---
