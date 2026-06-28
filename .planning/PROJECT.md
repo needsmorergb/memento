@@ -1,8 +1,10 @@
-# Memento
+# Olla
 
 ## What This Is
 
-Memento is a shared event-media platform for weddings, parties, and events. Guests join via a link/QR code (no account required) and capture photos, videos, and voice notes that are automatically pooled; when the host ends the event, Memento compiles a "same-day edit" highlight video and delivers it to everyone by push notification and email. Hosts and vendors manage events through web and mobile apps; monetization is tiered (free / pro / vendor) via Stripe.
+Olla (get-olla.com) is a shared event-media platform for weddings, parties, and events. Guests join via a link/QR code (no account required) and capture photos, videos, and voice notes that are automatically pooled; when the host ends the event, Olla compiles a "same-day edit" highlight video and delivers it to everyone by push notification and email. Hosts and vendors manage events through web and mobile apps; monetization is tiered (free / pro / vendor) via Stripe.
+
+> **Naming note:** The product is **Olla** (domain **get-olla.com**). The codebase still uses the original working name "Memento" in package/directory names (`memento-web`, `memento-mobile`, `@workspace/*`) and config (e.g. `RESEND_FROM_EMAIL`). The `.planning/codebase/*` docs intentionally keep those literal identifiers. A code/asset rebrand is **not** part of this milestone's feature scope (see Out of Scope).
 
 ## Core Value
 
@@ -42,6 +44,7 @@ When an event ends, every guest receives a polished same-day-edit video built fr
 - Off-Replit portability (S3/GCS-direct, external job queue) — infrastructure refactor, not user-facing scope here
 - Real-time chat between guests — outside the capture/gallery core value
 - Net-new subscription tiers — this milestone polishes existing tiers, doesn't add pricing SKUs
+- Code/asset rebrand (renaming `memento-*` packages, dirs, env defaults to Olla) — naming is settled at the product level; a code rebrand is a separate mechanical pass, not a feature slice
 
 ## Context
 
@@ -71,6 +74,7 @@ When an event ends, every guest receives a polished same-day-edit video built fr
 | Scope this milestone as one focused vertical slice per chosen theme | User selected all four themes but a focused 3–5 phase scope; depth-per-theme beats breadth | — Pending |
 | Structure phases as Vertical MVP slices across API + clients | User chose "both / full-stack slices"; each phase delivers an end-to-end user capability | — Pending |
 | Treat guest-revocation as the anchor of the Host-control slice | It is both a requested feature and a known security gap (no revoke endpoint, auth ignores `deletedAt`) | — Pending |
+| Product name is **Olla** (get-olla.com); keep `memento-*` code identifiers for now | Renaming product surface without churning the codebase; rebrand is a separate non-feature pass | — Pending |
 
 ## Evolution
 

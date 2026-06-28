@@ -1,4 +1,4 @@
-# Requirements: Memento
+# Requirements: Olla
 
 **Defined:** 2026-06-28
 **Core Value:** When an event ends, every guest receives a polished same-day-edit video built from the media they all captured together — that delivery must work reliably.
@@ -60,26 +60,24 @@ Deferred — acknowledged but not in this milestone's roadmap.
 
 ## Traceability
 
-Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VIDEO-01 | TBD | Pending |
-| VIDEO-02 | TBD | Pending |
-| VIDEO-03 | TBD | Pending |
-| HOST-01 | TBD | Pending |
-| HOST-02 | TBD | Pending |
-| HOST-03 | TBD | Pending |
-| GALLERY-01 | TBD | Pending |
-| GALLERY-02 | TBD | Pending |
-| VENDOR-01 | TBD | Pending |
-| VENDOR-02 | TBD | Pending |
+| VIDEO-01 | Phase 1 | Pending |
+| VIDEO-02 | Phase 1 | Pending |
+| VIDEO-03 | Phase 1 | Pending |
+| HOST-01 | Phase 2 | Pending |
+| HOST-02 | Phase 2 | Pending |
+| HOST-03 | Phase 2 | Pending |
+| GALLERY-01 | Phase 3 | Pending |
+| GALLERY-02 | Phase 3 | Pending |
+| VENDOR-01 | Phase 4 | Pending |
+| VENDOR-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 10 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 10 ⚠️
+- Mapped to phases: 10 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-28*
-*Last updated: 2026-06-28 after initial definition*
+*Last updated: 2026-06-28 after roadmap creation (traceability populated)*
