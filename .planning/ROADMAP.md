@@ -29,7 +29,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Host can watch the compiled same-day-edit video in-app (web and mobile) before any guest is notified
   3. Host can approve delivery, which then fans out push + email to guests; or trigger a re-generation that produces a fresh video for review
   4. Clients send a capture timestamp with each uploaded media item, and voice notes are positioned in the compiled video by that capture time rather than server confirm time
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 01-01-PLAN.md — Spec-first foundation: additive schema (ready_for_review enum, approvedAt/supersededAt, capturedAt) + OpenAPI approve/regenerate paths + codegen [wave 1]
+- [ ] 01-02-PLAN.md — Backend review gate: worker stops notifying + orders by capturedAt; approve/regenerate handlers; gated public token status [wave 2]
+- [ ] 01-03-PLAN.md — VIDEO-03 capture send: media confirm accepts capturedAt; mobile + web clients send it at capture/selection [wave 2]
+- [ ] 01-04-PLAN.md — Host review UI: web + mobile player + Approve/Regenerate, mobile authed-hook switch [wave 3]
 **UI hint**: yes
 
 ### Phase 2: Host Dashboard & Guest Control
@@ -77,7 +82,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Same-Day-Edit Video Control | 0/TBD | Not started | - |
+| 1. Same-Day-Edit Video Control | 0/4 | Planned | - |
 | 2. Host Dashboard & Guest Control | 0/TBD | Not started | - |
 | 3. Live Shared Gallery | 0/TBD | Not started | - |
 | 4. Vendor Provisioning & Benefits | 0/TBD | Not started | - |
