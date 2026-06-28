@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-06-28)
 ## Current Position
 
 Phase: 1 of 4 (Same-Day-Edit Video Control)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-06-28 — Roadmap created (4 vertical MVP slices, one per theme)
+Plan: 0 of 4 executed (4 plans written, not yet executed)
+Status: Planned — execution deferred to Replit (see Blockers)
+Last activity: 2026-06-28 — Phase 1 fully planned (CONTEXT, UI-SPEC, RESEARCH, PATTERNS, 4 PLANs); execution paused, env can't build/db-push locally
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -61,6 +61,7 @@ None yet.
 - Phase 2: Guest-token auth lookups ignore `deletedAt`; revocation requires adding the filter to every guest-token lookup before the remove-guest endpoint ships.
 - Cross-cutting: Spec-first discipline — edit `openapi.yaml`/`schema/index.ts` first, regenerate, restart API; never hand-edit generated files. Wrap `req.params.*` with `String(...)`.
 - Cross-cutting: Test coverage is thin (2 backend test files, no CI). Auth/revoke, video preview, gallery should ship with tests.
+- **ENV (blocking for local execution):** This Windows checkout cannot build or verify the app — `node_modules` not installed, `pnpm` not on PATH, `DATABASE_URL` unset (no local Postgres), and storage/Stripe creds come from the Replit sidecar (`127.0.0.1:1106`). Spec-first codegen (`orval`) and `pnpm --filter @workspace/db run push` cannot run here. **Run `/gsd:execute-phase 1` on Replit** (deps + DB + sidecar present), starting at Wave 1 (plan 01-01: schema + openapi + `db push` + `codegen`). All 4 Phase-1 plans carry full task/acceptance/threat-model detail and are ready to execute as-is.
 
 ## Deferred Items
 
@@ -73,5 +74,6 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-06-28
-Stopped at: Roadmap and state initialized; REQUIREMENTS.md traceability populated
-Resume file: None
+Stopped at: Phase 1 fully planned; autonomous execution paused at the execute gate because the local env cannot build/db-push/run the Replit-bound app
+Resume: On Replit, run `/gsd:execute-phase 1` (then continue the milestone). Or locally, re-plan/execute phases 2–4 (planning-only) if you want the full plan set before touching Replit.
+Resume file: .planning/phases/01-same-day-edit-video-control/01-01-PLAN.md
