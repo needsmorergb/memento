@@ -1,10 +1,11 @@
 ---
 phase: 1
 slug: same-day-edit-video-control
-status: draft
+status: approved
 shadcn_initialized: true
 preset: detected (new-york / neutral base / cssVariables)
 created: 2026-06-27
+reviewed_at: 2026-06-28
 ---
 
 # Phase 1 — UI Design Contract
