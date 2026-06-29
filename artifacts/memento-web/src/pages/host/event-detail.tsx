@@ -6,6 +6,8 @@ import {
   useListEventMedia,
   useGetEventQrPayload,
   useGetEventVideoStatus,
+  useApproveEventVideo,
+  useRegenerateEventVideo,
   useEndEvent,
   useDeleteEvent,
   getGetEventQueryKey,
@@ -127,11 +129,48 @@ export default function EventDetail() {
 
   const endEvent = useEndEvent();
   const deleteEvent = useDeleteEvent();
+  const approveVideo = useApproveEventVideo();
+  const regenerateVideo = useRegenerateEventVideo();
 
   const [showEndDialog, setShowEndDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
+  const [showRegenerateDialog, setShowRegenerateDialog] = useState(false);
 
   const guests = guestsData?.guests ?? [];
+
+  function invalidateVideoStatus() {
+    queryClient.invalidateQueries({ queryKey: getGetEventVideoStatusQueryKey(eventId) });
+    queryClient.invalidateQueries({ queryKey: getGetEventQueryKey(eventId) });
+  }
+
+  function handleApproveVideo() {
+    approveVideo.mutate(
+      { eventId },
+      {
+        onSuccess: () => {
+          invalidateVideoStatus();
+          setShowApproveDialog(false);
+          toast({ title: "Approved & delivered", description: "Guests have been notified by push and email." });
+        },
+        onError: () => toast({ title: "Failed to approve edit", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleRegenerateVideo() {
+    regenerateVideo.mutate(
+      { eventId },
+      {
+        onSuccess: () => {
+          invalidateVideoStatus();
+          setShowRegenerateDialog(false);
+          toast({ title: "Building a fresh edit…", description: "The new version will appear here for review." });
+        },
+        onError: () => toast({ title: "Failed to regenerate edit", variant: "destructive" }),
+      }
+    );
+  }
 
   async function handleEndEvent() {
     endEvent.mutate(
@@ -286,13 +325,47 @@ export default function EventDetail() {
           <div className="rounded-2xl border border-border bg-card p-6 mb-6" data-testid="card-video-status">
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <Film className="w-4 h-4 text-primary" />
-              Same-day edit
+              Review same-day edit
             </h3>
-            {videoStatus.status === "completed" && videoStatus.videoUrl ? (
-              <div>
+            {videoStatus.status === "ready_for_review" && videoStatus.videoUrl ? (
+              <div data-testid="video-review">
                 <video controls className="w-full rounded-xl mb-3 bg-black" data-testid="video-player">
                   <source src={videoStatus.videoUrl} />
                 </video>
+                <p className="text-sm text-primary font-semibold mb-3 flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4" />
+                  Ready for your review — guests haven't been notified yet
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={() => setShowApproveDialog(true)}
+                    disabled={approveVideo.isPending}
+                    data-testid="button-approve-video"
+                  >
+                    {approveVideo.isPending ? "Approving…" : "Approve & notify guests"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowRegenerateDialog(true)}
+                    disabled={regenerateVideo.isPending}
+                    data-testid="button-regenerate-video"
+                  >
+                    {regenerateVideo.isPending ? "Regenerating…" : "Regenerate edit"}
+                  </Button>
+                </div>
+              </div>
+            ) : videoStatus.status === "completed" && videoStatus.videoUrl ? (
+              <div data-testid="video-approved">
+                <video controls className="w-full rounded-xl mb-3 bg-black" data-testid="video-player">
+                  <source src={videoStatus.videoUrl} />
+                </video>
+                <p className="text-sm text-green-600 font-semibold flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4" />
+                  Approved & delivered
+                </p>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Guests have been notified by push and email. They can now watch the edit.
+                </p>
                 <a href={videoStatus.videoUrl} download>
                   <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-download-video">
                     <Download className="w-3.5 h-3.5" />
@@ -301,15 +374,26 @@ export default function EventDetail() {
                 </a>
               </div>
             ) : videoStatus.status === "failed" ? (
-              <div className="flex items-center gap-2 text-destructive text-sm" data-testid="text-video-failed">
-                <AlertCircle className="w-4 h-4" />
-                <span>Video generation failed: {videoStatus.errorMessage ?? "Unknown error"}</span>
+              <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4" data-testid="text-video-failed">
+                <div className="flex items-center gap-2 text-destructive text-sm font-semibold mb-3">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>We couldn't finish the edit. {videoStatus.errorMessage ?? "Unknown error"}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowRegenerateDialog(true)}
+                  disabled={regenerateVideo.isPending}
+                  data-testid="button-regenerate-video"
+                >
+                  {regenerateVideo.isPending ? "Regenerating…" : "Regenerate edit"}
+                </Button>
               </div>
             ) : (
               <div className="flex items-center gap-3 text-muted-foreground" data-testid="text-video-processing">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
                 <div>
-                  <p className="text-sm font-medium text-foreground">
+                  <p className="text-sm font-semibold text-foreground">
                     {videoStatusConfig[videoStatus.status]?.label ?? videoStatus.status}
                   </p>
                   <p className="text-xs">{videoStatus.tier ?? "standard"} · up to {Math.floor((videoStatus.durationCapSeconds ?? 60) / 60)}:{String((videoStatus.durationCapSeconds ?? 60) % 60).padStart(2, "0")}</p>
@@ -440,6 +524,50 @@ export default function EventDetail() {
               data-testid="button-confirm-delete"
             >
               {deleteEvent.isPending ? "Deleting..." : "Delete event"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve Video Dialog */}
+      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+        <DialogContent data-testid="dialog-approve-video">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-xl">Send this edit to all guests?</DialogTitle>
+            <DialogDescription>
+              Approving notifies every guest by push and email, and they'll be able to watch it. You can't un-send a notification.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowApproveDialog(false)}>Keep reviewing</Button>
+            <Button
+              onClick={handleApproveVideo}
+              disabled={approveVideo.isPending}
+              data-testid="button-confirm-approve"
+            >
+              {approveVideo.isPending ? "Approving…" : "Approve & notify"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Regenerate Video Dialog */}
+      <Dialog open={showRegenerateDialog} onOpenChange={setShowRegenerateDialog}>
+        <DialogContent data-testid="dialog-regenerate-video">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-xl">Regenerate the edit?</DialogTitle>
+            <DialogDescription>
+              This discards the current edit and builds a new one from scratch. Guests are not notified either way.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRegenerateDialog(false)}>Cancel</Button>
+            <Button
+              onClick={handleRegenerateVideo}
+              disabled={regenerateVideo.isPending}
+              data-testid="button-confirm-regenerate"
+            >
+              {regenerateVideo.isPending ? "Regenerating…" : "Regenerate"}
             </Button>
           </DialogFooter>
         </DialogContent>
