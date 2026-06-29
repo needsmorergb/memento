@@ -12,6 +12,7 @@ export type VideoJobStatusStatus = typeof VideoJobStatusStatus[keyof typeof Vide
 export const VideoJobStatusStatus = {
   pending: 'pending',
   processing: 'processing',
+  ready_for_review: 'ready_for_review',
   completed: 'completed',
   failed: 'failed',
 } as const;

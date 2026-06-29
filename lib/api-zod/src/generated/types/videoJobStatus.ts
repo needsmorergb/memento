@@ -18,4 +18,5 @@ export interface VideoJobStatus {
   errorMessage?: string | null;
   createdAt?: Date;
   completedAt?: Date | null;
+  approvedAt?: Date | null;
 }

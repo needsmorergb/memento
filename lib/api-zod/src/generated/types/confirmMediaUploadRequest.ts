@@ -14,4 +14,6 @@ export interface ConfirmMediaUploadRequest {
   fileSizeBytes?: number;
   durationSeconds?: number;
   thumbnailPath?: string;
+  /** Client capture time; used to order media. Optional (falls back to server confirm time). */
+  capturedAt?: Date;
 }

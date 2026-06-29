@@ -104,13 +104,14 @@ export const CreateEventResponse = zod.object({
   "videoJob": zod.object({
   "id": zod.string().uuid(),
   "eventId": zod.string().uuid(),
-  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
   "videoUrl": zod.string().nullish(),
   "durationCapSeconds": zod.number().optional(),
   "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date().optional(),
-  "completedAt": zod.coerce.date().nullish()
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
 }).nullish()
 }))
 
@@ -141,13 +142,14 @@ export const GetEventResponse = zod.object({
   "videoJob": zod.object({
   "id": zod.string().uuid(),
   "eventId": zod.string().uuid(),
-  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
   "videoUrl": zod.string().nullish(),
   "durationCapSeconds": zod.number().optional(),
   "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date().optional(),
-  "completedAt": zod.coerce.date().nullish()
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
 }).nullish()
 }))
 
@@ -187,13 +189,14 @@ export const UpdateEventResponse = zod.object({
   "videoJob": zod.object({
   "id": zod.string().uuid(),
   "eventId": zod.string().uuid(),
-  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
   "videoUrl": zod.string().nullish(),
   "durationCapSeconds": zod.number().optional(),
   "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date().optional(),
-  "completedAt": zod.coerce.date().nullish()
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
 }).nullish()
 }))
 
@@ -218,13 +221,14 @@ export const EndEventParams = zod.object({
 export const EndEventResponse = zod.object({
   "id": zod.string().uuid(),
   "eventId": zod.string().uuid(),
-  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
   "videoUrl": zod.string().nullish(),
   "durationCapSeconds": zod.number().optional(),
   "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date().optional(),
-  "completedAt": zod.coerce.date().nullish()
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
 })
 
 
@@ -257,13 +261,58 @@ export const GetEventVideoStatusParams = zod.object({
 export const GetEventVideoStatusResponse = zod.object({
   "id": zod.string().uuid(),
   "eventId": zod.string().uuid(),
-  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
   "videoUrl": zod.string().nullish(),
   "durationCapSeconds": zod.number().optional(),
   "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date().optional(),
-  "completedAt": zod.coerce.date().nullish()
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * Approves a video in ready_for_review state, marks it delivered, and fans out guest/host notifications. Idempotent — re-approving an already-approved video does not re-notify.
+ * @summary Approve the compiled video and trigger delivery (host only)
+ */
+export const ApproveEventVideoParams = zod.object({
+  "eventId": zod.coerce.string().uuid()
+})
+
+export const ApproveEventVideoResponse = zod.object({
+  "id": zod.string().uuid(),
+  "eventId": zod.string().uuid(),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
+  "videoUrl": zod.string().nullish(),
+  "durationCapSeconds": zod.number().optional(),
+  "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
+  "errorMessage": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * Marks the current latest video job superseded and enqueues a new pending job; the in-process worker recompiles. No guest notification fires until the new video is approved.
+ * @summary Supersede the current video and enqueue a fresh compile (host only)
+ */
+export const RegenerateEventVideoParams = zod.object({
+  "eventId": zod.coerce.string().uuid()
+})
+
+export const RegenerateEventVideoResponse = zod.object({
+  "id": zod.string().uuid(),
+  "eventId": zod.string().uuid(),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
+  "videoUrl": zod.string().nullish(),
+  "durationCapSeconds": zod.number().optional(),
+  "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
+  "errorMessage": zod.string().nullish(),
+  "createdAt": zod.coerce.date().optional(),
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
 })
 
 
@@ -313,13 +362,14 @@ export const GetEventVideoStatusByTokenParams = zod.object({
 export const GetEventVideoStatusByTokenResponse = zod.object({
   "id": zod.string().uuid(),
   "eventId": zod.string().uuid(),
-  "status": zod.enum(['pending', 'processing', 'completed', 'failed']),
+  "status": zod.enum(['pending', 'processing', 'ready_for_review', 'completed', 'failed']),
   "videoUrl": zod.string().nullish(),
   "durationCapSeconds": zod.number().optional(),
   "tier": zod.enum(['free', 'pro', 'vendor']).optional(),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.coerce.date().optional(),
-  "completedAt": zod.coerce.date().nullish()
+  "completedAt": zod.coerce.date().nullish(),
+  "approvedAt": zod.coerce.date().nullish()
 })
 
 
@@ -424,7 +474,8 @@ export const ConfirmMediaUploadBody = zod.object({
   "fileName": zod.string().optional(),
   "fileSizeBytes": zod.number().optional(),
   "durationSeconds": zod.number().optional(),
-  "thumbnailPath": zod.string().optional()
+  "thumbnailPath": zod.string().optional(),
+  "capturedAt": zod.coerce.date().optional().describe('Client capture time; used to order media. Optional (falls back to server confirm time).')
 })
 
 export const ConfirmMediaUploadResponse = zod.object({

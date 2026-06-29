@@ -248,6 +248,56 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /events/{eventId}/video/approve:
+    post:
+      operationId: approveEventVideo
+      tags: [video]
+      summary: Approve the compiled video and trigger delivery (host only)
+      description: Approves a video in ready_for_review state, marks it delivered, and fans out guest/host notifications. Idempotent — re-approving an already-approved video does not re-notify.
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: Video approved and delivery triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJobStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Video is not in ready_for_review state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /events/{eventId}/video/regenerate:
+    post:
+      operationId: regenerateEventVideo
+      tags: [video]
+      summary: Supersede the current video and enqueue a fresh compile (host only)
+      description: Marks the current latest video job superseded and enqueues a new pending job; the in-process worker recompiles. No guest notification fires until the new video is approved.
+      security:
+        - clerkAuth: []
+      parameters:
+        - $ref: "#/components/parameters/eventId"
+      responses:
+        "200":
+          description: New video job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoJobStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /events/{eventId}/qr-payload:
     get:
       operationId: getEventQrPayload
@@ -994,6 +1044,10 @@ components:
           type: integer
         thumbnailPath:
           type: string
+        capturedAt:
+          type: string
+          format: date-time
+          description: Client capture time; used to order media. Optional (falls back to server confirm time).
 
     SubscriptionInfo:
       type: object
@@ -1108,7 +1162,7 @@ components:
           format: uuid
         status:
           type: string
-          enum: [pending, processing, completed, failed]
+          enum: [pending, processing, ready_for_review, completed, failed]
         videoUrl:
           type: string
           nullable: true
@@ -1124,6 +1178,10 @@ components:
           type: string
           format: date-time
         completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        approvedAt:
           type: string
           format: date-time
           nullable: true

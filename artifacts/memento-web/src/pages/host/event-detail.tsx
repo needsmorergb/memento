@@ -36,6 +36,7 @@ const statusConfig = {
 const videoStatusConfig = {
   pending: { label: "In queue", icon: Clock, className: "text-muted-foreground" },
   processing: { label: "Processing", icon: Loader2, className: "text-blue-600 animate-spin" },
+  ready_for_review: { label: "Ready for review", icon: CheckCircle, className: "text-amber-600" },
   completed: { label: "Ready", icon: CheckCircle, className: "text-green-600" },
   failed: { label: "Failed", icon: AlertCircle, className: "text-destructive" },
 };

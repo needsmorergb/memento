@@ -897,6 +897,148 @@ export function useGetEventVideoStatus<TData = Awaited<ReturnType<typeof getEven
 
 
 
+export const getApproveEventVideoUrl = (eventId: string,) => {
+
+
+
+
+  return `/api/events/${eventId}/video/approve`
+}
+
+/**
+ * Approves a video in ready_for_review state, marks it delivered, and fans out guest/host notifications. Idempotent — re-approving an already-approved video does not re-notify.
+ * @summary Approve the compiled video and trigger delivery (host only)
+ */
+export const approveEventVideo = async (eventId: string, options?: RequestInit): Promise<VideoJobStatus> => {
+
+  return customFetch<VideoJobStatus>(getApproveEventVideoUrl(eventId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApproveEventVideoMutationOptions = <TError = ErrorType<UnauthorizedResponse | NotFoundResponse | ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveEventVideo>>, TError,{eventId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveEventVideo>>, TError,{eventId: string}, TContext> => {
+
+const mutationKey = ['approveEventVideo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveEventVideo>>, {eventId: string}> = (props) => {
+          const {eventId} = props ?? {};
+
+          return  approveEventVideo(eventId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveEventVideoMutationResult = NonNullable<Awaited<ReturnType<typeof approveEventVideo>>>
+
+    export type ApproveEventVideoMutationError = ErrorType<UnauthorizedResponse | NotFoundResponse | ErrorEnvelope>
+
+    /**
+ * @summary Approve the compiled video and trigger delivery (host only)
+ */
+export const useApproveEventVideo = <TError = ErrorType<UnauthorizedResponse | NotFoundResponse | ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveEventVideo>>, TError,{eventId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveEventVideo>>,
+        TError,
+        {eventId: string},
+        TContext
+      > => {
+      return useMutation(getApproveEventVideoMutationOptions(options));
+    }
+
+export const getRegenerateEventVideoUrl = (eventId: string,) => {
+
+
+
+
+  return `/api/events/${eventId}/video/regenerate`
+}
+
+/**
+ * Marks the current latest video job superseded and enqueues a new pending job; the in-process worker recompiles. No guest notification fires until the new video is approved.
+ * @summary Supersede the current video and enqueue a fresh compile (host only)
+ */
+export const regenerateEventVideo = async (eventId: string, options?: RequestInit): Promise<VideoJobStatus> => {
+
+  return customFetch<VideoJobStatus>(getRegenerateEventVideoUrl(eventId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRegenerateEventVideoMutationOptions = <TError = ErrorType<UnauthorizedResponse | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateEventVideo>>, TError,{eventId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof regenerateEventVideo>>, TError,{eventId: string}, TContext> => {
+
+const mutationKey = ['regenerateEventVideo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof regenerateEventVideo>>, {eventId: string}> = (props) => {
+          const {eventId} = props ?? {};
+
+          return  regenerateEventVideo(eventId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegenerateEventVideoMutationResult = NonNullable<Awaited<ReturnType<typeof regenerateEventVideo>>>
+
+    export type RegenerateEventVideoMutationError = ErrorType<UnauthorizedResponse | NotFoundResponse>
+
+    /**
+ * @summary Supersede the current video and enqueue a fresh compile (host only)
+ */
+export const useRegenerateEventVideo = <TError = ErrorType<UnauthorizedResponse | NotFoundResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateEventVideo>>, TError,{eventId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof regenerateEventVideo>>,
+        TError,
+        {eventId: string},
+        TContext
+      > => {
+      return useMutation(getRegenerateEventVideoMutationOptions(options));
+    }
+
 export const getGetEventQrPayloadUrl = (eventId: string,) => {
 
 

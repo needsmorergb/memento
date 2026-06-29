@@ -69,6 +69,7 @@ export type VideoJobStatusStatus = typeof VideoJobStatusStatus[keyof typeof Vide
 export const VideoJobStatusStatus = {
   pending: 'pending',
   processing: 'processing',
+  ready_for_review: 'ready_for_review',
   completed: 'completed',
   failed: 'failed',
 } as const;
@@ -92,6 +93,7 @@ export interface VideoJobStatus {
   errorMessage?: string | null;
   createdAt?: string;
   completedAt?: string | null;
+  approvedAt?: string | null;
 }
 
 export type EventDetail = EventSummary & ({
@@ -213,6 +215,8 @@ export interface ConfirmMediaUploadRequest {
   fileSizeBytes?: number;
   durationSeconds?: number;
   thumbnailPath?: string;
+  /** Client capture time; used to order media. Optional (falls back to server confirm time). */
+  capturedAt?: string;
 }
 
 export type SubscriptionInfoTier = typeof SubscriptionInfoTier[keyof typeof SubscriptionInfoTier];
