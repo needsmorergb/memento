@@ -4,16 +4,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { writeFile, readFile, mkdir, rm } from "fs/promises";
 import { db } from "@workspace/db";
-import {
-  videoJobsTable,
-  eventsTable,
-  mediaItemsTable,
-  eventGuestsTable,
-  usersTable,
-} from "@workspace/db/schema";
-import { eq, and, isNull, asc, count, lt } from "drizzle-orm";
+import { videoJobsTable, mediaItemsTable } from "@workspace/db/schema";
+import { eq, and, isNull, lt } from "drizzle-orm";
 import { getStorageDriver } from "./storage";
-import { sendPushNotifications, sendGuestEmails, sendHostEmail } from "./notifications";
 import { logger } from "./logger";
 
 const execFileAsync = promisify(execFile);
@@ -307,16 +300,22 @@ async function processVideoJob(jobId: string): Promise<void> {
 
     const mediaItems = await db.query.mediaItemsTable.findMany({
       where: and(eq(mediaItemsTable.eventId, job.eventId), isNull(mediaItemsTable.deletedAt)),
-      orderBy: (t, { asc }) => [asc(t.createdAt)],
     });
+
+    // Order by capture time (VIDEO-03): prefer client-supplied capturedAt, fall back
+    // to server confirm time (createdAt). Drizzle has no clean COALESCE in the
+    // relational orderBy callback, so sort in JS (small N per event).
+    const sortKey = (m: { capturedAt: Date | null; createdAt: Date }) =>
+      (m.capturedAt ?? m.createdAt).getTime();
+    mediaItems.sort((a, b) => sortKey(a) - sortKey(b));
 
     logger.info({ jobId, itemCount: mediaItems.length }, "Media items fetched");
 
     // Separate visual clips from voice notes, tracking timestamps for chronological placement
     const visualClips: Clip[] = [];
     const voiceNotes: VoiceNote[] = [];
-    // Anchor timestamp: creation time of the first media item, for computing delays
-    const anchorTime = mediaItems.length > 0 ? mediaItems[0].createdAt.getTime() : Date.now();
+    // Anchor timestamp: capture time of the first media item, for computing delays
+    const anchorTime = mediaItems.length > 0 ? sortKey(mediaItems[0]) : Date.now();
     let idx = 0;
 
     for (const item of mediaItems) {
@@ -359,7 +358,7 @@ async function processVideoJob(jobId: string): Promise<void> {
         const audioPath = join(workDir, `voice_${idx}.aac`);
         try {
           await extractVoiceAudio(inputPath, audioPath);
-          const delayMs = Math.max(0, item.createdAt.getTime() - anchorTime);
+          const delayMs = Math.max(0, sortKey(item) - anchorTime);
           voiceNotes.push({ audioPath, delayMs });
           logger.info({ jobId, idx, delayMs }, "Voice note audio extracted");
         } catch (err) {
@@ -400,64 +399,20 @@ async function processVideoJob(jobId: string): Promise<void> {
 
     const { videoUrl, videoObjectPath } = await uploadVideoToStorage(outputPath, jobId);
 
+    // Terminal state is ready_for_review — the host must approve before any
+    // guest is notified. The notification fan-out lives in the approve handler
+    // (routes/events.ts), NOT here. completedAt is stamped on approval.
     await db
       .update(videoJobsTable)
       .set({
-        status: "completed",
+        status: "ready_for_review",
         videoUrl,
         videoObjectPath,
-        completedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(videoJobsTable.id, jobId));
 
-    logger.info({ jobId, videoUrl }, "Job completed — dispatching notifications");
-
-    const event = await db.query.eventsTable.findFirst({
-      where: eq(eventsTable.id, job.eventId),
-    });
-    if (!event) {
-      logger.warn({ jobId }, "Event not found for notifications");
-      return;
-    }
-
-    // Fetch all guests for notification dispatch
-    const allGuests = await db.query.eventGuestsTable.findMany({
-      where: and(eq(eventGuestsTable.eventId, job.eventId), isNull(eventGuestsTable.deletedAt)),
-    });
-
-    const host = await db.query.usersTable.findFirst({
-      where: eq(usersTable.id, event.hostId),
-    });
-
-    const [{ value: mediaCount }] = await db
-      .select({ value: count() })
-      .from(mediaItemsTable)
-      .where(and(eq(mediaItemsTable.eventId, job.eventId), isNull(mediaItemsTable.deletedAt)));
-
-    // Push: all guests who joined the event (covers both "uploaded" and "viewed" — view
-    // tracking is not yet in the schema, so all attendees are treated as potential viewers)
-    //
-    // Email: all guests who provided an email address (not filtered to uploaders only)
-    await Promise.allSettled([
-      sendPushNotifications(allGuests, event.title, videoUrl),
-      sendGuestEmails(allGuests, event, videoUrl),
-      host
-        ? sendHostEmail(
-            host,
-            event,
-            videoUrl,
-            allGuests.length,
-            Number(mediaCount),
-            job.tier,
-          )
-        : Promise.resolve(),
-    ]);
-
-    logger.info(
-      { jobId, guestCount: allGuests.length },
-      "All notifications dispatched",
-    );
+    logger.info({ jobId, videoUrl }, "Job ready for review — awaiting host approval");
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     logger.error({ err, jobId }, "Video job failed");
