@@ -52,3 +52,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Maestro tool state (machine-local)
+.maestro/
