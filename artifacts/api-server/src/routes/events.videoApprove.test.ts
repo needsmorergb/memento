@@ -119,16 +119,21 @@ const EVENT_ID = "event-1";
 const readyJob = {
   id: "job-1",
   eventId: EVENT_ID,
-  status: "ready_for_review",
+  status: "ready_for_review" as const,
+  tier: "free" as const,
+  durationCapSeconds: 60,
+  qualityCap: "standard",
+  maxResolutionPx: 720,
   videoUrl: "https://signed/review.mp4",
   videoObjectPath: "/objects/videos/job-1.mp4",
-  durationCapSeconds: 60,
-  tier: "free",
   errorMessage: null,
+  startedAt: null,
   createdAt: new Date("2026-06-28T00:00:00Z"),
   completedAt: null,
   approvedAt: null,
   supersededAt: null,
+  updatedAt: new Date("2026-06-28T00:00:00Z"),
+  deletedAt: null,
 };
 
 beforeEach(() => {

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { db } from "@workspace/db";
 import {
   eventsTable,
@@ -6,10 +6,16 @@ import {
   mediaItemsTable,
   videoJobsTable,
   subscriptionsTable,
+  usersTable,
 } from "@workspace/db/schema";
 import { eq, and, isNull, count, sql } from "drizzle-orm";
 import { requireAuth, optionalAuth, type AuthenticatedRequest } from "../lib/auth";
 import { getDurationCap, getQualityCap } from "../lib/tier";
+import {
+  sendPushNotifications,
+  sendGuestEmails,
+  sendHostEmail,
+} from "../lib/notifications";
 import crypto from "crypto";
 
 const router = Router();
@@ -100,6 +106,210 @@ function formatEvent(
     };
   }
   return base;
+}
+
+type VideoJobRow = typeof videoJobsTable.$inferSelect;
+
+// Centralized VideoJobStatus serializer (CONVENTIONS §Function & Module Design —
+// a formatEvent-style serializer over inlining; now 4+ identical call sites).
+// Exported for unit testing.
+export function formatVideoJob(job: VideoJobRow) {
+  return {
+    id: job.id,
+    eventId: job.eventId,
+    status: job.status,
+    videoUrl: job.videoUrl,
+    durationCapSeconds: job.durationCapSeconds,
+    tier: job.tier,
+    errorMessage: job.errorMessage,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt,
+    approvedAt: job.approvedAt,
+  };
+}
+
+// SECURITY-CRITICAL (Research Pitfall 1): the public/token video-status must NOT
+// expose the unapproved review cut. Until approvedAt is set, withhold videoUrl
+// and map any pre-approval state to a benign "processing"-equivalent so guests
+// cannot learn a review cut exists. Only once approvedAt is set is the full shape
+// (including videoUrl) exposed. Exported for unit testing.
+export function buildTokenVideoStatusResponse(job: VideoJobRow) {
+  if (job.approvedAt) {
+    return formatVideoJob(job);
+  }
+  // Pre-approval: leak nothing about the review cut.
+  // pending/processing/failed are pre-existing guest-visible states; ready_for_review
+  // (and any future pre-approval state) is masked to "processing".
+  const guestStatus = job.status === "failed" ? "failed" : "processing";
+  return {
+    id: job.id,
+    eventId: job.eventId,
+    status: guestStatus,
+    videoUrl: null,
+    durationCapSeconds: job.durationCapSeconds,
+    tier: job.tier,
+    errorMessage: job.status === "failed" ? job.errorMessage : null,
+    createdAt: job.createdAt,
+    completedAt: null,
+    approvedAt: null,
+  };
+}
+
+// Approve the same-day-edit video: stamp approvedAt + status=completed and fan out
+// push + email exactly once. Idempotent on approvedAt. Host-only (ownership → 404).
+// Exported for unit testing.
+export async function approveVideoHandler(req: AuthenticatedRequest, res: Response) {
+  try {
+    const user = req.dbUser!;
+    const event = await db.query.eventsTable.findFirst({
+      where: and(
+        eq(eventsTable.id, String(req.params.eventId)),
+        isNull(eventsTable.deletedAt),
+      ),
+    });
+
+    if (!event || event.hostId !== user.id) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    const job = await db.query.videoJobsTable.findFirst({
+      where: and(
+        eq(videoJobsTable.eventId, event.id),
+        isNull(videoJobsTable.supersededAt),
+      ),
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+    });
+
+    if (!job || job.status !== "ready_for_review") {
+      // Already-approved jobs are status=completed and handled by the idempotency
+      // branch below; otherwise the video is not in a reviewable state.
+      if (job?.approvedAt) {
+        res.status(200).json(formatVideoJob(job));
+        return;
+      }
+      res.status(409).json({ error: "Video is not ready for review" });
+      return;
+    }
+
+    // Idempotency (Research Open Q1): a re-approve must not re-notify.
+    if (job.approvedAt) {
+      res.status(200).json(formatVideoJob(job));
+      return;
+    }
+
+    const now = new Date();
+    const [updatedJob] = await db
+      .update(videoJobsTable)
+      .set({
+        status: "completed",
+        approvedAt: now,
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(videoJobsTable.id, job.id))
+      .returning();
+
+    // Relocated fan-out (from videoWorker.ts). Notifications fire on approve only.
+    const videoUrl = updatedJob.videoUrl ?? job.videoUrl ?? "";
+    const allGuests = await db.query.eventGuestsTable.findMany({
+      where: and(
+        eq(eventGuestsTable.eventId, event.id),
+        isNull(eventGuestsTable.deletedAt),
+      ),
+    });
+    const host = await db.query.usersTable.findFirst({
+      where: eq(usersTable.id, event.hostId),
+    });
+    const [{ value: mediaCount }] = await db
+      .select({ value: count() })
+      .from(mediaItemsTable)
+      .where(
+        and(
+          eq(mediaItemsTable.eventId, event.id),
+          isNull(mediaItemsTable.deletedAt),
+        ),
+      );
+
+    await Promise.allSettled([
+      sendPushNotifications(allGuests, event.title, videoUrl),
+      sendGuestEmails(allGuests, event, videoUrl),
+      host
+        ? sendHostEmail(
+            host,
+            event,
+            videoUrl,
+            allGuests.length,
+            Number(mediaCount),
+            job.tier,
+          )
+        : Promise.resolve(),
+    ]);
+
+    res.status(200).json(formatVideoJob(updatedJob));
+  } catch (err) {
+    req.log.error(err, "Failed to approve video");
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+// Regenerate the same-day-edit video: supersede the current latest job and enqueue
+// a fresh pending job (worker picks it up). Host-only. Does NOT notify.
+// Exported for unit testing.
+export async function regenerateVideoHandler(req: AuthenticatedRequest, res: Response) {
+  try {
+    const user = req.dbUser!;
+    const event = await db.query.eventsTable.findFirst({
+      where: and(
+        eq(eventsTable.id, String(req.params.eventId)),
+        isNull(eventsTable.deletedAt),
+      ),
+    });
+
+    if (!event || event.hostId !== user.id) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    const current = await db.query.videoJobsTable.findFirst({
+      where: and(
+        eq(videoJobsTable.eventId, event.id),
+        isNull(videoJobsTable.supersededAt),
+      ),
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+    });
+
+    const now = new Date();
+    // Mark the current latest non-superseded job superseded regardless of its
+    // status (Research Open Q2) so the worker's selection picks the new job.
+    if (current) {
+      await db
+        .update(videoJobsTable)
+        .set({ supersededAt: now, updatedAt: now })
+        .where(eq(videoJobsTable.id, current.id));
+    }
+
+    // Re-resolve tier caps (carry over from the superseded job when present).
+    const tier = current?.tier ?? "free";
+    const durationCapSeconds = current?.durationCapSeconds ?? getDurationCap(tier);
+    const { quality, maxResolutionPx } = getQualityCap(tier);
+
+    const [newJob] = await db
+      .insert(videoJobsTable)
+      .values({
+        eventId: event.id,
+        tier,
+        durationCapSeconds,
+        qualityCap: current?.qualityCap ?? quality,
+        maxResolutionPx: current?.maxResolutionPx ?? maxResolutionPx,
+      })
+      .returning();
+
+    res.status(200).json(formatVideoJob(newJob));
+  } catch (err) {
+    req.log.error(err, "Failed to regenerate video");
+    res.status(500).json({ error: "Internal server error" });
+  }
 }
 
 // List host's events
@@ -376,6 +586,12 @@ router.post("/events/:eventId/end", requireAuth, async (req: AuthenticatedReques
   }
 });
 
+// Approve the compiled video for delivery (host only) — triggers notification fan-out
+router.post("/events/:eventId/video/approve", requireAuth, approveVideoHandler);
+
+// Regenerate the video: supersede the current job and enqueue a fresh one (host only)
+router.post("/events/:eventId/video/regenerate", requireAuth, regenerateVideoHandler);
+
 // List event guests (host only)
 router.get("/events/:eventId/guests", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
@@ -445,7 +661,10 @@ router.get(
       }
 
       const job = await db.query.videoJobsTable.findFirst({
-        where: eq(videoJobsTable.eventId, event.id),
+        where: and(
+          eq(videoJobsTable.eventId, event.id),
+          isNull(videoJobsTable.supersededAt),
+        ),
         orderBy: (t, { desc }) => [desc(t.createdAt)],
       });
 
@@ -454,17 +673,8 @@ router.get(
         return;
       }
 
-      res.json({
-        id: job.id,
-        eventId: job.eventId,
-        status: job.status,
-        videoUrl: job.videoUrl,
-        durationCapSeconds: job.durationCapSeconds,
-        tier: job.tier,
-        errorMessage: job.errorMessage,
-        createdAt: job.createdAt,
-        completedAt: job.completedAt,
-      });
+      // Host/event-guest are authed — surface ready_for_review + videoUrl freely.
+      res.json(formatVideoJob(job));
     } catch (err) {
       req.log.error(err, "Failed to get video status");
       res.status(500).json({ error: "Internal server error" });
@@ -565,7 +775,10 @@ router.get("/events/token/:shareToken/video-status", async (req, res) => {
     }
 
     const job = await db.query.videoJobsTable.findFirst({
-      where: eq(videoJobsTable.eventId, event.id),
+      where: and(
+        eq(videoJobsTable.eventId, event.id),
+        isNull(videoJobsTable.supersededAt),
+      ),
       orderBy: (t, { desc }) => [desc(t.createdAt)],
     });
 
@@ -574,17 +787,8 @@ router.get("/events/token/:shareToken/video-status", async (req, res) => {
       return;
     }
 
-    res.json({
-      id: job.id,
-      eventId: job.eventId,
-      status: job.status,
-      videoUrl: job.videoUrl,
-      durationCapSeconds: job.durationCapSeconds,
-      tier: job.tier,
-      errorMessage: job.errorMessage,
-      createdAt: job.createdAt,
-      completedAt: job.completedAt,
-    });
+    // SECURITY-CRITICAL: never expose the unapproved review cut to guests.
+    res.json(buildTokenVideoStatusResponse(job));
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
