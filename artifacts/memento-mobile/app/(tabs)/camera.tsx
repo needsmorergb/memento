@@ -91,7 +91,8 @@ export default function CameraScreen() {
       contentType: string,
       mediaType: "photo" | "video" | "voice_note",
       fileSizeBytes?: number,
-      durationSeconds?: number
+      durationSeconds?: number,
+      capturedAt?: string
     ) => {
       if (!eventId) {
         Alert.alert("No event", "You are not part of an event.");
@@ -121,6 +122,7 @@ export default function CameraScreen() {
                 fileName,
                 fileSizeBytes,
                 durationSeconds,
+                capturedAt,
               },
             },
             { onSuccess: () => res(), onError: rej }
@@ -153,11 +155,20 @@ export default function CameraScreen() {
 
   const handleTakePhoto = async () => {
     if (isUploading || eventEnded || !cameraRef.current) return;
+    const capturedAt = new Date().toISOString();
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.85 });
       if (!photo?.uri) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await doUpload(photo.uri, `photo_${Date.now()}.jpg`, "image/jpeg", "photo");
+      await doUpload(
+        photo.uri,
+        `photo_${Date.now()}.jpg`,
+        "image/jpeg",
+        "photo",
+        undefined,
+        undefined,
+        capturedAt
+      );
     } catch (e) {
       Alert.alert("Capture error", e instanceof Error ? e.message : "Failed");
     }
@@ -181,6 +192,9 @@ export default function CameraScreen() {
       const duration = recordingStartRef.current
         ? Math.round((Date.now() - recordingStartRef.current) / 1000)
         : undefined;
+      const capturedAt = recordingStartRef.current
+        ? new Date(recordingStartRef.current).toISOString()
+        : new Date().toISOString();
       recordingStartRef.current = null;
       stopTimer();
       setIsRecordingVideo(false);
@@ -192,7 +206,8 @@ export default function CameraScreen() {
           "video/mp4",
           "video",
           undefined,
-          duration
+          duration,
+          capturedAt
         );
       }
     } catch {
@@ -232,6 +247,9 @@ export default function CameraScreen() {
     const dur = voiceStartRef.current
       ? Math.round((Date.now() - voiceStartRef.current) / 1000)
       : undefined;
+    const capturedAt = voiceStartRef.current
+      ? new Date(voiceStartRef.current).toISOString()
+      : new Date().toISOString();
     voiceStartRef.current = null;
     stopTimer();
     await voiceRecording.stopAndUnloadAsync();
@@ -240,7 +258,15 @@ export default function CameraScreen() {
     setVoiceTimer(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (!uri) return;
-    await doUpload(uri, `voice_${Date.now()}.m4a`, "audio/m4a", "voice_note", undefined, dur ?? 0);
+    await doUpload(
+      uri,
+      `voice_${Date.now()}.m4a`,
+      "audio/m4a",
+      "voice_note",
+      undefined,
+      dur ?? 0,
+      capturedAt
+    );
   };
 
   const needsCamPerm = mode !== "voice" && (!camPerm || !camPerm.granted);

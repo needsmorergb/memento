@@ -92,6 +92,9 @@ async function uploadFileAs(
     headers: { "Content-Type": file.type },
   });
 
+  // Capture time at selection: prefer the file's lastModified, fall back to now.
+  const capturedAt = new Date(file.lastModified || Date.now()).toISOString();
+
   await new Promise<void>((resolve, reject) => {
     confirmUpload.mutate(
       {
@@ -101,6 +104,7 @@ async function uploadFileAs(
           mediaType,
           fileName: file.name,
           fileSizeBytes: file.size,
+          capturedAt,
         },
       },
       { onSuccess: () => { onInvalidate(); resolve(); }, onError: reject }
