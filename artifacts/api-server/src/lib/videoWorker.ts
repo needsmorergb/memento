@@ -12,14 +12,13 @@ import {
   usersTable,
 } from "@workspace/db/schema";
 import { eq, and, isNull, asc, count, lt } from "drizzle-orm";
-import { objectStorageClient } from "./objectStorage";
+import { getStorageDriver } from "./storage";
 import { sendPushNotifications, sendGuestEmails, sendHostEmail } from "./notifications";
 import { logger } from "./logger";
 
 const execFileAsync = promisify(execFile);
 
 const POLL_INTERVAL_MS = 30_000;
-const SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 const STUCK_JOB_TIMEOUT_MS = 30 * 60 * 1000;
 const XFADE_DUR = 0.5; // seconds crossfade overlap between clips
 const VIDEO_FILTER =
@@ -27,50 +26,13 @@ const VIDEO_FILTER =
   "pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30";
 
 // ── Object storage helpers ────────────────────────────────────────────────
-
-function parseRawPath(path: string): { bucketName: string; objectName: string } {
-  if (!path.startsWith("/")) path = `/${path}`;
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length < 1) throw new Error(`Invalid object path: ${path}`);
-  return { bucketName: parts[0], objectName: parts.slice(1).join("/") };
-}
-
-async function signObjectURL(opts: {
-  bucketName: string;
-  objectName: string;
-  method: "GET" | "PUT";
-  ttlSec: number;
-}): Promise<string> {
-  const res = await fetch(`${SIDECAR_ENDPOINT}/object-storage/signed-object-url`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      bucket_name: opts.bucketName,
-      object_name: opts.objectName,
-      method: opts.method,
-      expires_at: new Date(Date.now() + opts.ttlSec * 1000).toISOString(),
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to sign URL (${res.status}): ${text}`);
-  }
-  const { signed_url } = (await res.json()) as { signed_url: string };
-  return signed_url;
-}
+//
+// Backed by the pluggable storage driver (Replit/GCS or S3/MinIO) selected via
+// STORAGE_DRIVER. entityId = the path after "/objects/".
 
 async function downloadMediaToTmp(objectPath: string, destPath: string): Promise<void> {
-  const privateDir = process.env.PRIVATE_OBJECT_DIR ?? "";
-  if (!privateDir) throw new Error("PRIVATE_OBJECT_DIR not set");
-  const entitySubPath = objectPath.replace(/^\/objects\//, "");
-  const { bucketName, objectName: dirName } = parseRawPath(privateDir);
-  const fullObjectName = dirName ? `${dirName}/${entitySubPath}` : entitySubPath;
-  const bucket = objectStorageClient.bucket(bucketName);
-  const file = bucket.file(fullObjectName);
-  const [exists] = await file.exists();
-  if (!exists) throw new Error(`Object not found: ${fullObjectName}`);
-  const [buffer] = await file.download();
+  const entityId = objectPath.replace(/^\/objects\//, "");
+  const buffer = await getStorageDriver().getObjectBytes(entityId);
   await writeFile(destPath, buffer);
 }
 
@@ -78,26 +40,12 @@ async function uploadVideoToStorage(
   localPath: string,
   jobId: string,
 ): Promise<{ videoUrl: string; videoObjectPath: string }> {
-  const privateDir = process.env.PRIVATE_OBJECT_DIR ?? "";
-  if (!privateDir) throw new Error("PRIVATE_OBJECT_DIR not set");
-  const { bucketName, objectName: dirName } = parseRawPath(privateDir);
-  const objectName = dirName ? `${dirName}/videos/${jobId}.mp4` : `videos/${jobId}.mp4`;
-  const putUrl = await signObjectURL({ bucketName, objectName, method: "PUT", ttlSec: 900 });
+  const entityId = `videos/${jobId}.mp4`;
   const videoBuffer = await readFile(localPath);
-  const putRes = await fetch(putUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "video/mp4" },
-    body: videoBuffer,
-    signal: AbortSignal.timeout(300_000),
-  });
-  if (!putRes.ok) throw new Error(`Video upload failed: ${putRes.status}`);
-  const videoUrl = await signObjectURL({
-    bucketName,
-    objectName,
-    method: "GET",
-    ttlSec: 86400 * 7,
-  });
-  return { videoUrl, videoObjectPath: `/objects/videos/${jobId}.mp4` };
+  await getStorageDriver().putObject(entityId, videoBuffer, "video/mp4");
+  // 7-day signed GET URL embedded in the notification emails.
+  const videoUrl = await getStorageDriver().signDownloadUrl(entityId, 86400 * 7);
+  return { videoUrl, videoObjectPath: `/objects/${entityId}` };
 }
 
 // ── ffprobe helper ────────────────────────────────────────────────────────

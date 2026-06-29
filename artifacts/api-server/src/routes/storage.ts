@@ -79,13 +79,11 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
   try {
     const raw = req.params.filePath;
     const filePath = Array.isArray(raw) ? raw.join("/") : raw;
-    const file = await objectStorageService.searchPublicObject(filePath);
-    if (!file) {
+    const response = await objectStorageService.getPublicObjectResponse(filePath);
+    if (!response) {
       res.status(404).json({ error: "File not found" });
       return;
     }
-
-    const response = await objectStorageService.downloadObject(file);
 
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));
@@ -171,8 +169,7 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
       return;
     }
 
-    const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
-    const response = await objectStorageService.downloadObject(objectFile);
+    const response = await objectStorageService.getObjectEntityResponse(objectPath);
 
     res.status(response.status);
     response.headers.forEach((value, key) => res.setHeader(key, value));

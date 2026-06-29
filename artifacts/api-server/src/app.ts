@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type RequestHandler } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { clerkMiddleware } from "@clerk/express";
@@ -15,6 +15,34 @@ import { getUncachableStripeClient } from "./lib/stripeClient";
 import router from "./routes";
 
 const app: Express = express();
+
+/**
+ * Local-dev fallback when Clerk is not configured (no CLERK_SECRET_KEY).
+ *
+ * The real `clerkMiddleware` throws on every request without a secret key, which
+ * would 500 even unauthenticated guest/health requests. This shim installs a
+ * branded, signed-out `req.auth` so `getAuth(req)` returns `{ userId: null }`
+ * and guest flows work. Host/vendor login requires real Clerk keys.
+ */
+const CLERK_AUTH_BRAND = Symbol.for("@clerk/express.auth");
+function signedOutClerkShim(): RequestHandler {
+  const authHandler = Object.assign(
+    () => ({
+      userId: null,
+      sessionId: null,
+      orgId: null,
+      tokenType: "session_token",
+      getToken: async () => null,
+      has: () => false,
+      debug: () => ({}),
+    }),
+    { [CLERK_AUTH_BRAND]: true },
+  );
+  return (req, _res, next) => {
+    (req as unknown as { auth: unknown }).auth = authHandler;
+    next();
+  };
+}
 
 // ─── Stripe webhook — must be BEFORE express.json() so body stays a Buffer ───
 
@@ -90,14 +118,21 @@ app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
+if (process.env.CLERK_SECRET_KEY) {
+  app.use(
+    clerkMiddleware((req) => ({
+      publishableKey: publishableKeyFromHost(
+        getClerkProxyHost(req) ?? "",
+        process.env.CLERK_PUBLISHABLE_KEY,
+      ),
+    })),
+  );
+} else {
+  logger.warn(
+    "CLERK_SECRET_KEY not set — host/vendor auth disabled (guest flows only). Add Clerk keys to .env to enable login.",
+  );
+  app.use(signedOutClerkShim());
+}
 
 app.use("/api", router);
 
