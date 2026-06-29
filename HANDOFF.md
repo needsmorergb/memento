@@ -20,12 +20,20 @@ Expo mobile app, Vite web app, Postgres/Drizzle, Stripe billing.
    - Full codebase map → `.planning/codebase/` (7 docs).
    - `PROJECT.md`, `REQUIREMENTS.md` (10 v1 reqs), `ROADMAP.md` (4 phases), `STATE.md`, `config.json`.
    - 4-phase roadmap: ① Same-Day-Edit Video Control · ② Host Dashboard & Guest Control · ③ Live Shared Gallery · ④ Vendor Provisioning & Benefits.
-   - **Phase 1 is fully planned but not executed**: `CONTEXT`, `UI-SPEC`, `RESEARCH`, `PATTERNS`, and 4 `PLAN` files in `.planning/phases/01-same-day-edit-video-control/`.
+   - **Phase 1 is IMPLEMENTED (4/4 plans built & committed) — paused at one human-verify gate.**
+     Commits `f7033d2 … bfba854`. All schema/codegen/backend/clients/UI work is done and spot-checked
+     (api-server typecheck clean, 31 unit tests pass, VIDEO-01/02/03 closed in code). The only thing
+     left before the phase is marked complete is a **visual UAT of the host review UI** (Plan 01-04) —
+     see `.planning/phases/01-same-day-edit-video-control/.continue-here.md` and `01-HUMAN-UAT.md`.
+     What shipped: a review gate where the same-day edit stops at `ready_for_review` (no guest is
+     notified at compile time), a host-only Approve (fans out push+email, idempotent) / Regenerate
+     flow on web + mobile, capture-time ordering of media (`capturedAt`), and the public/token path
+     provably masks the unapproved cut.
 
-2. **Local-dev portability is done** (this is the big recent change): the app no
-   longer requires Replit — it builds and runs on any machine with Docker. See
-   [LOCAL_DEV.md](LOCAL_DEV.md). Verified end-to-end: db push, typecheck, build,
-   server boots, `GET /api/healthz` → 200, S3 presigned round-trip against MinIO.
+2. **Local-dev portability is done** — the app no longer requires Replit. It runs with Docker
+   ([LOCAL_DEV.md](LOCAL_DEV.md)) **or, on a machine without Docker, with native binaries** (see
+   "Resume here" below — this machine uses native Postgres + MinIO because Docker isn't installed).
+   Verified end-to-end: db push, typecheck, build, `GET /api/healthz` → 200, S3 round-trip vs MinIO.
 
 ## Get running on a new machine
 
@@ -64,11 +72,38 @@ Storage/DB envs (`DATABASE_URL`, `S3_*`, `STORAGE_DRIVER=s3`) are pre-filled for
 local Docker. For production/Replit, leave `STORAGE_DRIVER` unset (defaults to
 `replit`) and the Replit connectors are used unchanged.
 
+## Resume here (this Mac — native stack, no Docker)
+
+This machine has **no Docker** (and brew is locked to another user), so the docker-compose
+services run as native binaries instead. Node 24 LTS is the default via `fnm` (no PATH hacks).
+After a reboot, bring the stack back up:
+
+```bash
+# 1. Postgres 16 (native, portable build) + MinIO — both under ~/.olla-localdev
+PGBIN=~/.olla-localdev/pg/postgresql-16.4.0-aarch64-apple-darwin/bin
+MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+  nohup ~/.local/bin/minio server ~/.olla-localdev/minio-data --address :9000 --console-address :9001 \
+  >~/.olla-localdev/logs/minio.log 2>&1 &
+nohup "$PGBIN/postgres" -D ~/.olla-localdev/pgdata -p 5432 -k /tmp >~/.olla-localdev/logs/postgres.log 2>&1 &
+
+# 2. API server (Node 24 is already default; PORT=5050 because macOS AirPlay holds :5000)
+cd ~/memento && set -a && . ./.env && set +a && pnpm --filter @workspace/api-server run dev
+# verify:  curl http://localhost:5050/api/healthz   →  {"status":"ok"}
+```
+
+> The `.env` here pins `PORT=5050` and `STORAGE_DRIVER=s3` (MinIO). The `olla-media` bucket and its
+> public `download` prefix already exist. To re-create from scratch, see commands in
+> `~/.local/bin/mc` usage or LOCAL_DEV.md.
+
 ## What's next (suggested)
 
-- **Execute Phase 1** — now possible locally: `/gsd:execute-phase 1` (4 plans,
-  3 waves: schema+codegen → backend review gate + capture-time → host review UI).
-  Then continue the milestone (`/gsd-autonomous` resumes at the execute gate).
+- **Finish Phase 1** (one gate left): start the local stack (above) + web/mobile dev servers,
+  walk `.planning/phases/01-same-day-edit-video-control/01-HUMAN-UAT.md` (6 checks) against an
+  event whose edit reached `ready_for_review`. If all pass → reply "approved" and re-run
+  `/gsd-execute-phase 1` — it resumes past the checkpoint, runs phase verification, and marks
+  Phase 1 complete. If issues → `/gsd-plan-phase 1 --gaps` then `/gsd-execute-phase 1 --gaps-only`.
+- Then continue the milestone: Phase 2 (Host Dashboard & Guest Control) via
+  `/gsd-discuss-phase 2` → `/gsd-plan-phase 2` → `/gsd-execute-phase 2`, or `/gsd-autonomous`.
 - Or do feature work directly; the roadmap/requirements in `.planning/` are the spec.
 
 ## Gotchas
