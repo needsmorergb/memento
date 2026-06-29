@@ -129,6 +129,7 @@ router.post(
         fileSizeBytes,
         durationSeconds,
         thumbnailPath,
+        capturedAt,
       } = req.body as {
         objectPath: string;
         mediaType: "photo" | "video" | "voice_note";
@@ -136,6 +137,7 @@ router.post(
         fileSizeBytes?: number;
         durationSeconds?: number;
         thumbnailPath?: string;
+        capturedAt?: string;
       };
 
       if (!objectPath || !mediaType) {
@@ -172,6 +174,7 @@ router.post(
           fileSizeBytes,
           durationSeconds,
           thumbnailPath,
+          capturedAt: capturedAt ? new Date(capturedAt) : undefined,
         })
         .returning();
 
@@ -189,6 +192,7 @@ router.post(
         fileSizeBytes: item.fileSizeBytes,
         durationSeconds: item.durationSeconds,
         thumbnailPath: item.thumbnailPath,
+        capturedAt: item.capturedAt,
         createdAt: item.createdAt,
       });
     } catch (err) {
