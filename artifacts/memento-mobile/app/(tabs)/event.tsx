@@ -1,6 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import { useAuth, useClerk, useUser } from "@clerk/expo";
-import { endEvent } from "@workspace/api-client-react";
+import { endEvent, approveEventVideo, regenerateEventVideo } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ResizeMode, Video } from "expo-av";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
@@ -22,10 +24,12 @@ import { useEvent } from "@/context/EventContext";
 import { useColors } from "@/hooks/useColors";
 import {
   useGetEventByToken,
+  useGetEventVideoStatus,
   useGetEventVideoStatusByToken,
   useListEventMedia,
   useGetMySubscription,
   getGetMySubscriptionQueryKey,
+  getGetEventVideoStatusQueryKey,
 } from "@workspace/api-client-react";
 
 function InfoRow({
@@ -85,6 +89,7 @@ export default function EventScreen() {
   const { isSignedIn, getToken, signOut } = useAuth();
   const clerk = useClerk();
   const { user } = useUser();
+  const queryClient = useQueryClient();
 
   const DOMAIN = process.env.EXPO_PUBLIC_DOMAIN;
   const { data: mySub } = useGetMySubscription({
@@ -106,6 +111,8 @@ export default function EventScreen() {
   const [authLoading, setAuthLoading] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
   const [endingEvent, setEndingEvent] = React.useState(false);
+  const [approvingVideo, setApprovingVideo] = React.useState(false);
+  const [regeneratingVideo, setRegeneratingVideo] = React.useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -136,10 +143,100 @@ export default function EventScreen() {
     { query: { enabled: !!shareToken, refetchInterval: 15000 } as any }
   );
 
-  const { data: videoStatus } = useGetEventVideoStatusByToken(shareToken ?? "", {
+  // Host review card reads the AUTHED video-status (never the public token hook):
+  // the public/token path withholds the unapproved review cut. The token hook
+  // below remains only for the guest-facing path.
+  const { data: hostVideoStatus } = useGetEventVideoStatus(eventId ?? "", {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    query: { enabled: !!shareToken && eventStatus === "ended", refetchInterval: 20000 } as any,
+    query: {
+      queryKey: getGetEventVideoStatusQueryKey(eventId ?? ""),
+      enabled: !!eventId && isHost && eventStatus === "ended",
+      refetchInterval: (query: { state: { data?: { status?: string } } }) => {
+        const status = query.state.data?.status;
+        return status === "pending" || status === "processing" ? 3000 : false;
+      },
+    } as any,
   });
+
+  const { data: guestVideoStatus } = useGetEventVideoStatusByToken(shareToken ?? "", {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: {
+      enabled: !!shareToken && !isHost && eventStatus === "ended",
+      refetchInterval: 20000,
+    } as any,
+  });
+
+  const videoStatus = isHost ? hostVideoStatus : guestVideoStatus;
+
+  function invalidateHostVideoStatus() {
+    queryClient.invalidateQueries({
+      queryKey: getGetEventVideoStatusQueryKey(eventId ?? ""),
+    });
+  }
+
+  const handleApproveVideo = () => {
+    if (!eventId) return;
+    Alert.alert(
+      "Send this edit to all guests?",
+      "Approving notifies every guest by push and email, and they'll be able to watch it. You can't un-send a notification.",
+      [
+        { text: "Keep reviewing", style: "cancel" },
+        {
+          text: "Approve & notify",
+          style: "destructive",
+          onPress: async () => {
+            setApprovingVideo(true);
+            try {
+              const token = await getToken();
+              await approveEventVideo(eventId, {
+                headers: { Authorization: `Bearer ${token ?? ""}` },
+              });
+              invalidateHostVideoStatus();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              Alert.alert(
+                "Approved & delivered",
+                "Guests have been notified by push and email. They can now watch the edit."
+              );
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : "Could not approve edit";
+              Alert.alert("Error", msg);
+            } finally {
+              setApprovingVideo(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRegenerateVideo = () => {
+    if (!eventId) return;
+    Alert.alert(
+      "Regenerate the edit?",
+      "This discards the current edit and builds a new one from scratch. Guests are not notified either way.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Regenerate",
+          onPress: async () => {
+            setRegeneratingVideo(true);
+            try {
+              const token = await getToken();
+              await regenerateEventVideo(eventId, {
+                headers: { Authorization: `Bearer ${token ?? ""}` },
+              });
+              invalidateHostVideoStatus();
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : "Could not regenerate edit";
+              Alert.alert("Error", msg);
+            } finally {
+              setRegeneratingVideo(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const handleClerkSignIn = async () => {
     if (!clerk.client) {
@@ -608,9 +705,11 @@ export default function EventScreen() {
                 {videoStatus.status === "pending"
                   ? "Video queued…"
                   : videoStatus.status === "processing"
-                  ? "Compiling video…"
+                  ? "Compiling your same-day edit…"
+                  : videoStatus.status === "ready_for_review"
+                  ? "Review same-day edit"
                   : videoStatus.status === "completed"
-                  ? "Highlight video ready!"
+                  ? "Approved & delivered"
                   : "Video generation failed"}
               </Text>
               {(videoStatus.status === "pending" ||
@@ -618,43 +717,145 @@ export default function EventScreen() {
                 <ActivityIndicator size="small" color={colors.primary} />
               )}
             </View>
-            {videoStatus.status === "completed" && videoStatus.videoUrl && (
-              <TouchableOpacity
-                style={[styles.watchBtn, { backgroundColor: "#16a34a" }]}
-                onPress={() => {
-                  if (videoStatus.videoUrl) {
-                    router.push({
-                      pathname: "/video",
-                      params: {
-                        url: videoStatus.videoUrl,
-                        title: eventTitle ?? "Highlight Video",
-                        date: event?.eventDate ?? "",
-                      },
-                    });
-                  }
-                }}
-                activeOpacity={0.8}
-              >
-                <Feather name="play" size={16} color="#fff" />
+
+            {videoStatus.status === "ready_for_review" && videoStatus.videoUrl && (
+              <>
+                <Video
+                  source={{ uri: videoStatus.videoUrl }}
+                  style={styles.reviewVideo}
+                  resizeMode={ResizeMode.CONTAIN}
+                  useNativeControls
+                />
                 <Text
                   style={[
-                    styles.watchBtnText,
-                    { fontFamily: "Outfit_600SemiBold" },
+                    styles.videoSub,
+                    { color: colors.primary, fontFamily: "Outfit_600SemiBold" },
                   ]}
                 >
-                  Watch Video
+                  Ready for your review — guests haven&apos;t been notified yet
                 </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.watchBtn,
+                    { backgroundColor: colors.primary, opacity: approvingVideo ? 0.6 : 1 },
+                  ]}
+                  onPress={handleApproveVideo}
+                  disabled={approvingVideo || regeneratingVideo}
+                  activeOpacity={0.8}
+                >
+                  {approvingVideo ? (
+                    <>
+                      <ActivityIndicator color="#fff" />
+                      <Text
+                        style={[styles.watchBtnText, { fontFamily: "Outfit_600SemiBold" }]}
+                      >
+                        Approving…
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Feather name="send" size={16} color="#fff" />
+                      <Text
+                        style={[styles.watchBtnText, { fontFamily: "Outfit_600SemiBold" }]}
+                      >
+                        Approve &amp; notify guests
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.outlineBtn,
+                    { borderColor: colors.border, opacity: regeneratingVideo ? 0.6 : 1 },
+                  ]}
+                  onPress={handleRegenerateVideo}
+                  disabled={approvingVideo || regeneratingVideo}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.outlineBtnText,
+                      { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
+                    ]}
+                  >
+                    {regeneratingVideo ? "Regenerating…" : "Regenerate edit"}
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
-            {videoStatus.status === "failed" && videoStatus.errorMessage && (
-              <Text
-                style={[
-                  styles.videoSub,
-                  { color: colors.destructive, fontFamily: "Outfit_400Regular" },
-                ]}
-              >
-                {videoStatus.errorMessage}
-              </Text>
+
+            {videoStatus.status === "completed" && videoStatus.videoUrl && (
+              <>
+                <Text
+                  style={[
+                    styles.videoSub,
+                    { color: "#15803d", fontFamily: "Outfit_400Regular" },
+                  ]}
+                >
+                  Guests have been notified by push and email. They can now watch the edit.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.watchBtn, { backgroundColor: "#16a34a" }]}
+                  onPress={() => {
+                    if (videoStatus.videoUrl) {
+                      router.push({
+                        pathname: "/video",
+                        params: {
+                          url: videoStatus.videoUrl,
+                          title: eventTitle ?? "Highlight Video",
+                          date: event?.eventDate ?? "",
+                        },
+                      });
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Feather name="play" size={16} color="#fff" />
+                  <Text
+                    style={[
+                      styles.watchBtnText,
+                      { fontFamily: "Outfit_600SemiBold" },
+                    ]}
+                  >
+                    Watch Video
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {videoStatus.status === "failed" && (
+              <>
+                {videoStatus.errorMessage && (
+                  <Text
+                    style={[
+                      styles.videoSub,
+                      { color: colors.destructive, fontFamily: "Outfit_400Regular" },
+                    ]}
+                  >
+                    We couldn&apos;t finish the edit. {videoStatus.errorMessage}
+                  </Text>
+                )}
+                {isHost && (
+                  <TouchableOpacity
+                    style={[
+                      styles.outlineBtn,
+                      { borderColor: colors.border, opacity: regeneratingVideo ? 0.6 : 1 },
+                    ]}
+                    onPress={handleRegenerateVideo}
+                    disabled={regeneratingVideo}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.outlineBtnText,
+                        { color: colors.foreground, fontFamily: "Outfit_600SemiBold" },
+                      ]}
+                    >
+                      {regeneratingVideo ? "Regenerating…" : "Regenerate edit"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             )}
           </View>
         )}
@@ -960,6 +1161,22 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   watchBtnText: { color: "#fff", fontSize: 15 },
+  reviewVideo: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: 10,
+    backgroundColor: "#000",
+  },
+  outlineBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  outlineBtnText: { fontSize: 15 },
 
   hostSection: { gap: 8 },
   sectionLabel: { fontSize: 16 },
