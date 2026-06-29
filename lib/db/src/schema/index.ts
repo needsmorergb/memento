@@ -28,6 +28,7 @@ export const mediaTypeEnum = pgEnum("media_type", [
 export const videoJobStatusEnum = pgEnum("video_job_status", [
   "pending",
   "processing",
+  "ready_for_review",
   "completed",
   "failed",
 ]);
@@ -189,6 +190,7 @@ export const mediaItemsTable = pgTable("media_items", {
   fileSizeBytes: integer("file_size_bytes"),
   durationSeconds: integer("duration_seconds"),
   thumbnailPath: text("thumbnail_path"),
+  capturedAt: timestamp("captured_at"), // nullable; client-supplied at confirm (VIDEO-03)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
@@ -220,6 +222,8 @@ export const videoJobsTable = pgTable("video_jobs", {
   errorMessage: text("error_message"),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
+  approvedAt: timestamp("approved_at"), // set by approve handler — doubles as "delivered" signal
+  supersededAt: timestamp("superseded_at"), // set on prior job by regenerate
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   deletedAt: timestamp("deleted_at"),
@@ -233,6 +237,8 @@ export const insertVideoJobSchema = createInsertSchema(videoJobsTable).omit({
   errorMessage: true,
   startedAt: true,
   completedAt: true,
+  approvedAt: true,
+  supersededAt: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
