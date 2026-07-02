@@ -1,9 +1,9 @@
 ---
-name: Memento project overview
-description: Stack, API client patterns, and key architectural facts for the Memento wedding/event media-sharing app
+name: Momento project overview
+description: Stack, API client patterns, and key architectural facts for the Momento wedding/event media-sharing app
 ---
 
-# Memento Project Overview
+# Momento Project Overview
 
 ## Stack
 - pnpm workspaces monorepo, Node.js 24, TypeScript 5.9

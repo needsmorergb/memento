@@ -25,7 +25,7 @@ function AppDownloadBanner() {
           <Smartphone className="w-5 h-5 text-primary" />
         </div>
         <div className="flex-1 text-center sm:text-left">
-          <p className="font-semibold text-sm">Get the Memento app</p>
+          <p className="font-semibold text-sm">Get the Momento app</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             Download photos, re-watch the edit, and share memories right from your phone.
           </p>

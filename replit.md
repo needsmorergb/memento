@@ -1,4 +1,4 @@
-# Memento
+# Momento
 
 A shared event media platform for weddings, parties, and events — guests capture photos, videos, and voice notes that are automatically distributed to everyone, capped with a "same-day edit" video delivered by push notification and email when the event ends.
 

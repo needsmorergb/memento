@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "Memento"
+title = "Momento"
 version = "1.0.0"
 id = "artifacts/memento-web"
 router = "path"

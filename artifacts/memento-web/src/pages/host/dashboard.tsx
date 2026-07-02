@@ -93,7 +93,7 @@ export default function HostDashboard() {
             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
               <Camera className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-serif text-xl font-bold">Memento</span>
+            <span className="font-serif text-xl font-bold">Momento</span>
           </div>
           <div className="flex items-center gap-3">
             {subscription && (

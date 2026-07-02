@@ -1,8 +1,15 @@
 import { getUncachableStripeClient } from "./stripeClient.ts";
 
+const PRO_NAME = "Momento Pro Host";
+const PRO_DESCRIPTION =
+  "Unlimited events, up to 5-minute same-day edit videos, and priority processing.";
+const VENDOR_NAME = "Momento Vendor";
+const VENDOR_DESCRIPTION =
+  "Everything in Pro, plus vendor referral codes that give clients 3-minute edits.";
+
 async function seedProducts() {
   const stripe = await getUncachableStripeClient();
-  console.log("Seeding Stripe products for Memento...");
+  console.log("Seeding Stripe products for Momento...");
 
   // ── Pro Host Plan ──────────────────────────────────────────────────────────
 
@@ -13,12 +20,18 @@ async function seedProducts() {
   let proProduct: { id: string };
   if (existingPro.data.length > 0) {
     proProduct = existingPro.data[0];
-    console.log(`✓ Pro Host product already exists: ${proProduct.id}`);
+    // Apply current branding/copy to the already-seeded product. Without this,
+    // accounts initialised before a rebrand keep stale names on billing surfaces
+    // (GET /billing/prices exposes product.name).
+    await stripe.products.update(proProduct.id, {
+      name: PRO_NAME,
+      description: PRO_DESCRIPTION,
+    });
+    console.log(`✓ Updated existing Pro Host product: ${proProduct.id}`);
   } else {
     proProduct = await stripe.products.create({
-      name: "Memento Pro Host",
-      description:
-        "Unlimited events, up to 5-minute same-day edit videos, and priority processing.",
+      name: PRO_NAME,
+      description: PRO_DESCRIPTION,
       metadata: { tier: "pro" },
     });
     console.log(`✓ Created Pro Host product: ${proProduct.id}`);
@@ -49,14 +62,17 @@ async function seedProducts() {
   });
 
   if (existingVendor.data.length > 0) {
+    await stripe.products.update(existingVendor.data[0].id, {
+      name: VENDOR_NAME,
+      description: VENDOR_DESCRIPTION,
+    });
     console.log(
-      `✓ Vendor product already exists: ${existingVendor.data[0].id}`,
+      `✓ Updated existing Vendor product: ${existingVendor.data[0].id}`,
     );
   } else {
     const vendorProduct = await stripe.products.create({
-      name: "Memento Vendor",
-      description:
-        "Everything in Pro, plus vendor referral codes that give clients 3-minute edits.",
+      name: VENDOR_NAME,
+      description: VENDOR_DESCRIPTION,
       metadata: { tier: "vendor" },
     });
     console.log(`✓ Created Vendor product: ${vendorProduct.id}`);
